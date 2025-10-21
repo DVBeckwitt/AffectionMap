@@ -27,9 +27,16 @@ class PersonProfile:
 
 def correlation(first: np.ndarray, second: np.ndarray) -> float:
     """Return the Pearson correlation between two value arrays."""
-    if np.all(first == first[0]) or np.all(second == second[0]):
+    first_arr = np.asarray(first, dtype=float)
+    second_arr = np.asarray(second, dtype=float)
+
+    if np.allclose(first_arr, second_arr):
+        return 1.0
+
+    if np.all(first_arr == first_arr[0]) or np.all(second_arr == second_arr[0]):
         return 0.0
-    corr, _ = pearsonr(first, second)
+
+    corr, _ = pearsonr(first_arr, second_arr)
     return float(corr)
 
 
