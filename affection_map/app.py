@@ -26,7 +26,7 @@ class LoveLanguageApp:
         self.master = master
         self.master.title("AffectionMap – Love Language Alignment")
 
-        self._input_widgets: Dict[str, Dict[str, object]] = {}
+        self._profiles: Dict[str, Dict[str, object]] = {}
         self.canvas: FigureCanvasTkAgg | None = None
         self._figure: Figure | None = None
         self._axes: Tuple | None = None
@@ -36,6 +36,20 @@ class LoveLanguageApp:
         self._insights_current = False
         self.scale_canvas: tk.Canvas | None = None
         self._default_names = {"person_a": "A", "person_b": "B"}
+        self._switch_buttons: Dict[str, ttk.Radiobutton] = {}
+        self._switch_label_vars: Dict[str, tk.StringVar] = {}
+        self._handle_lookup: Dict[Tuple[str, str], Tuple[str, str]] = {
+            ("person_a", "giving"): ("a_to_b", "giving_handle"),
+            ("person_a", "receiving"): ("b_to_a", "receiving_handle"),
+            ("person_b", "giving"): ("b_to_a", "giving_handle"),
+            ("person_b", "receiving"): ("a_to_b", "receiving_handle"),
+        }
+        self._active_person_var = tk.StringVar(value="person_a")
+        self._angles = np.asarray(polar_angles(), dtype=float)
+        self._base_angles = self._angles[:-1]
+        self._canvas_cids: List[int] = []
+        self._drag_state: Optional[Dict[str, object]] = None
+        self._drag_angle_threshold = np.deg2rad(22.5)
         self._scale_markers: Dict[str, Dict[str, object | None]] = {
             "a_to_b": {
                 "value": None,
@@ -63,8 +77,9 @@ class LoveLanguageApp:
         self.master.update_idletasks()
         self.master.minsize(self.master.winfo_width(), self.master.winfo_height())
         self.text_var.set(
-            "Adjust the sliders to explore how preferences shift. "
-            "Click Generate Compatibility Report for detailed insights."
+            "Use the toggle to choose whose preferences to adjust, then drag the "
+            "handles on the radar charts. Click Generate Compatibility Report for "
+            "detailed insights."
         )
         self.master.after_idle(self._refresh_live_preview)
 
@@ -90,15 +105,60 @@ class LoveLanguageApp:
         instructions = ttk.Label(
             section,
             text=(
-                "Use the sliders to choose how strongly each love language resonates, from "
-                "Not at all to Essential (0 to 10)."
+                "Select whose preferences to adjust using the toggle below, then drag the "
+                "circular handles on the radar charts to set how strongly each love "
+                "language resonates (0 to 10)."
             ),
             wraplength=720,
         )
         instructions.grid(row=0, column=0, columnspan=2, sticky=tk.W)
 
-        self._create_person_frame(section, "person_a", "Person A", 1, 0)
-        self._create_person_frame(section, "person_b", "Person B", 1, 1)
+        self._create_active_profile_switch(section)
+
+        self._create_person_frame(section, "person_a", "Person A", 2, 0)
+        self._create_person_frame(section, "person_b", "Person B", 2, 1)
+
+    def _create_active_profile_switch(self, parent: ttk.Frame) -> None:
+        switch_frame = ttk.Frame(parent, padding=(0, 12, 0, 8))
+        switch_frame.grid(row=1, column=0, columnspan=2, sticky=tk.W)
+
+        ttk.Label(
+            switch_frame,
+            text="Adjusting preferences for:",
+            font=("Helvetica", 10, "bold"),
+        ).grid(row=0, column=0, padx=(0, 12))
+
+        for idx, (key, label_text) in enumerate(
+            (("person_a", "Person A"), ("person_b", "Person B")), start=1
+        ):
+            label_var = tk.StringVar(value=label_text)
+            button = ttk.Radiobutton(
+                switch_frame,
+                variable=self._active_person_var,
+                value=key,
+                textvariable=label_var,
+                command=self._on_active_person_changed,
+            )
+            button.grid(row=0, column=idx, padx=6)
+            self._switch_buttons[key] = button
+            self._switch_label_vars[key] = label_var
+
+    def _on_active_person_changed(self) -> None:
+        self._update_handle_visibility()
+        if self.canvas is not None:
+            self.canvas.draw_idle()
+
+    def _update_switch_label(self, key: str) -> None:
+        label_var = self._switch_label_vars.get(key)
+        profile = self._profiles.get(key)
+        if not label_var or not profile:
+            return
+
+        title = cast(str, profile.get("title", ""))
+        name_var = cast(tk.StringVar, profile["name_var"])
+        display_name = name_var.get().strip() or self._default_names[key]
+        label_text = f"{title}: {display_name}" if title else display_name
+        label_var.set(label_text)
 
     def _create_person_frame(
         self, parent: ttk.Frame, key: str, title: str, row: int, column: int
@@ -126,87 +186,31 @@ class LoveLanguageApp:
         name_entry.bind("<FocusOut>", _handle_focus_out)
 
         def _on_name_change(*_: object) -> None:
+            self._update_switch_label(key)
             self._schedule_live_update()
 
         name_var.trace_add("write", _on_name_change)
 
-        giving_label = ttk.Label(frame, text="Giving")
-        giving_label.grid(row=1, column=1, pady=(10, 0))
-        receiving_label = ttk.Label(frame, text="Receiving")
-        receiving_label.grid(row=1, column=2, pady=(10, 0))
-
         frame.columnconfigure(1, weight=1)
-        frame.columnconfigure(2, weight=1)
 
-        giving_sliders: List[ttk.Scale] = []
-        receiving_sliders: List[ttk.Scale] = []
+        ttk.Label(
+            frame,
+            text="Drag the radar chart handles to adjust this person's giving and "
+            "receiving preferences.",
+            wraplength=240,
+        ).grid(row=1, column=0, columnspan=2, pady=(12, 0), sticky=tk.W)
 
-        for idx, category in enumerate(CATEGORIES, start=2):
-            ttk.Label(frame, text=category).grid(
-                row=idx, column=0, padx=(0, 10), pady=2, sticky=tk.W
-            )
-
-            show_markers = idx == len(CATEGORIES) + 1
-            giving_container, giving_slider = self._create_slider_widget(
-                frame, show_markers=show_markers
-            )
-            giving_container.grid(row=idx, column=1, padx=5, pady=2, sticky=tk.EW)
-            giving_sliders.append(giving_slider)
-
-            receiving_container, receiving_slider = self._create_slider_widget(
-                frame, show_markers=show_markers
-            )
-            receiving_container.grid(row=idx, column=2, padx=5, pady=2, sticky=tk.EW)
-            receiving_sliders.append(receiving_slider)
-
-        self._input_widgets[key] = {
-            "name": name_entry,
+        profile_info: Dict[str, object] = {
+            "frame": frame,
+            "name_entry": name_entry,
             "name_var": name_var,
-            "giving": giving_sliders,
-            "receiving": receiving_sliders,
+            "giving": np.full(len(CATEGORIES), 5.0, dtype=float),
+            "receiving": np.full(len(CATEGORIES), 5.0, dtype=float),
+            "title": title,
         }
 
-    def _create_slider_widget(
-        self, parent: ttk.Frame, *, show_markers: bool = True
-    ) -> Tuple[ttk.Frame, ttk.Scale]:
-        markers = [
-            ("Not at all", tk.W),
-            ("Essential", tk.E),
-        ]
-
-        container = ttk.Frame(parent)
-        container.columnconfigure(0, weight=1)
-
-        display_var = tk.StringVar(value="5.00")
-
-        slider = ttk.Scale(container, from_=0.0, to=10.0, orient=tk.HORIZONTAL)
-        slider.set(5.0)
-        slider.grid(row=0, column=0, sticky=tk.EW)
-
-        value_label = ttk.Label(container, textvariable=display_var, width=6, anchor=tk.E)
-        value_label.grid(row=0, column=1, padx=(8, 0))
-
-        if show_markers:
-            legend = ttk.Frame(container)
-            legend.grid(row=1, column=0, columnspan=2, sticky=tk.EW, pady=(4, 0))
-            for idx, (label, anchor) in enumerate(markers):
-                legend.columnconfigure(idx, weight=1)
-                ttk.Label(legend, text=label, font=("Helvetica", 8)).grid(
-                    row=0, column=idx, sticky=anchor
-                )
-
-        def _update_display(value: str) -> None:
-            rounded = round(float(value), 2)
-            display_var.set(f"{rounded:.2f}")
-
-        def _on_slider_change(value: str) -> None:
-            _update_display(value)
-            self._schedule_live_update()
-
-        slider.configure(command=_on_slider_change)
-        _update_display("5.0")
-
-        return container, slider
+        self._profiles[key] = profile_info
+        self._update_switch_label(key)
 
     def _create_action_section(self, parent: ttk.Frame) -> None:
         section = ttk.Frame(parent)
@@ -453,19 +457,11 @@ class LoveLanguageApp:
             marker_info["label_text"] = labels[key]
             self._draw_scale_marker(key)
 
-    def _collect_slider_values(self, sliders: List[ttk.Scale]) -> List[float]:
-        values: List[float] = []
-        for widget in sliders:
-            value = round(float(widget.get()), 2)
-            if not 0 <= value <= 10:
-                raise ValueError("Scores must be between 0 and 10.")
-            values.append(value)
-        return values
-
     def _gather_profile(self, key: str, *, require_name: bool) -> PersonProfile:
-        widgets = self._input_widgets[key]
-        name_entry: ttk.Entry = widgets["name"]  # type: ignore[assignment]
-        name = name_entry.get().strip()
+        profile_info = self._profiles[key]
+        name_entry = cast(ttk.Entry, profile_info["name_entry"])
+        name_var = cast(tk.StringVar, profile_info["name_var"])
+        name = name_var.get().strip()
         if not name:
             if require_name:
                 name_entry.focus_set()
@@ -475,8 +471,8 @@ class LoveLanguageApp:
                 )
             name = self._default_names[key]
 
-        giving = np.array(self._collect_slider_values(widgets["giving"]))
-        receiving = np.array(self._collect_slider_values(widgets["receiving"]))
+        giving = cast(np.ndarray, profile_info["giving"]).astype(float, copy=True)
+        receiving = cast(np.ndarray, profile_info["receiving"]).astype(float, copy=True)
         return PersonProfile(name=name, giving=giving, receiving=receiving)
 
     def _extract_profile(self, key: str) -> PersonProfile:
@@ -488,9 +484,10 @@ class LoveLanguageApp:
     def _schedule_live_update(self) -> None:
         if self._live_update_job is not None:
             self.master.after_cancel(self._live_update_job)
-        # Update quickly so the radar charts closely track slider movement.
+        # Update quickly so the radar charts closely track handle movement while
+        # typing names or making other quick adjustments.
         # A 10 ms delay keeps the UI responsive while providing very smooth
-        # visual feedback when users drag the scales in small increments.
+        # visual feedback when users drag the handles in small increments.
         self._live_update_job = self.master.after(10, self._refresh_live_preview)
 
     def _refresh_live_preview(self) -> None:
@@ -498,6 +495,9 @@ class LoveLanguageApp:
         person_a = self._gather_profile("person_a", require_name=False)
         person_b = self._gather_profile("person_b", require_name=False)
         self._render_plot(person_a, person_b)
+        self._mark_insights_stale()
+
+    def _mark_insights_stale(self) -> None:
         if self._insights_current:
             self.text_var.set(
                 "Values updated. Click Generate Compatibility Report to refresh the insights."
@@ -519,11 +519,11 @@ class LoveLanguageApp:
         ]
         if untouched_profiles:
             messagebox.showwarning(
-                "Adjust the sliders",
+                "Adjust the handles",
                 (
-                    "The following profiles still have every slider at 5.00: "
+                    "The following profiles still have every handle at 5.00: "
                     + ", ".join(untouched_profiles)
-                    + ". Adjust the sliders to reflect real preferences before relying on this report."
+                    + ". Drag the radar chart handles to reflect real preferences before relying on this report."
                 ),
             )
 
@@ -547,7 +547,7 @@ class LoveLanguageApp:
             and np.allclose(profile.receiving, 5.0)
         )
 
-    def _ensure_plot_canvas(self, angles: np.ndarray) -> None:
+    def _ensure_plot_canvas(self) -> None:
         if self.canvas is not None and self._axes is not None and self._figure is not None:
             return
 
@@ -556,7 +556,7 @@ class LoveLanguageApp:
         axes_tuple = tuple(np.ravel(axes_array))
 
         for ax in axes_tuple:
-            ax.set_xticks(angles[:-1])
+            ax.set_xticks(self._base_angles)
             ax.set_xticklabels(CATEGORIES, fontsize=8)
             ax.set_yticks(np.arange(0, 11, 2))
             ax.set_ylim(0, 10)
@@ -574,6 +574,104 @@ class LoveLanguageApp:
         self.canvas = FigureCanvasTkAgg(figure, master=self.plot_frame)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self._connect_canvas_events()
+
+    def _connect_canvas_events(self) -> None:
+        if self.canvas is None or self._canvas_cids:
+            return
+        self._canvas_cids = [
+            self.canvas.mpl_connect("button_press_event", self._on_canvas_press),
+            self.canvas.mpl_connect("motion_notify_event", self._on_canvas_motion),
+            self.canvas.mpl_connect("button_release_event", self._on_canvas_release),
+        ]
+
+    def _closest_angle(self, theta: float) -> Tuple[int, float]:
+        differences = np.abs((theta - self._base_angles + np.pi) % (2 * np.pi) - np.pi)
+        index = int(np.argmin(differences))
+        return index, float(differences[index])
+
+    def _get_handle_artist(
+        self, person_key: str, mode: str
+    ) -> Tuple[object | None, object | None, str | None]:
+        mapping = self._handle_lookup.get((person_key, mode))
+        if mapping is None:
+            return None, None, None
+        axis_key, handle_key = mapping
+        artists = self._plot_artists.get(axis_key)
+        if not artists:
+            return None, None, None
+        handle = artists.get(handle_key)
+        axis = artists.get("axis")
+        return handle, axis, axis_key
+
+    def _set_profile_value(self, person_key: str, mode: str, index: int, value: float) -> None:
+        profile = self._profiles.get(person_key)
+        if not profile:
+            return
+        if value is None or not np.isfinite(value):
+            return
+        values = cast(np.ndarray, profile[mode])
+        clamped = float(np.clip(value, 0.0, 10.0))
+        values[index] = clamped
+        self._mark_insights_stale()
+        self._update_visuals_from_profiles()
+
+    def _update_visuals_from_profiles(self) -> None:
+        person_a = self._gather_profile("person_a", require_name=False)
+        person_b = self._gather_profile("person_b", require_name=False)
+        self._render_plot(person_a, person_b)
+
+    def _on_canvas_press(self, event) -> None:
+        if getattr(event, "button", None) != 1 or event.inaxes is None:
+            return
+        if event.xdata is None or event.ydata is None:
+            return
+
+        active_person = self._active_person_var.get()
+        for mode in ("giving", "receiving"):
+            handle, axis, axis_key = self._get_handle_artist(active_person, mode)
+            if handle is None or axis is None:
+                continue
+            if not getattr(handle, "get_visible", lambda: False)():
+                continue
+            if event.inaxes != axis:
+                continue
+
+            index, difference = self._closest_angle(event.xdata)
+            if difference > self._drag_angle_threshold:
+                continue
+
+            self._drag_state = {
+                "person": active_person,
+                "mode": mode,
+                "index": index,
+                "axis_key": axis_key,
+            }
+            self._set_profile_value(active_person, mode, index, event.ydata)
+            break
+
+    def _on_canvas_motion(self, event) -> None:
+        if not self._drag_state:
+            return
+        axis_key = cast(str, self._drag_state.get("axis_key"))
+        artists = self._plot_artists.get(axis_key, {})
+        axis = artists.get("axis")
+        if axis is None or event.inaxes != axis:
+            return
+        if event.ydata is None:
+            return
+
+        self._set_profile_value(
+            cast(str, self._drag_state["person"]),
+            cast(str, self._drag_state["mode"]),
+            cast(int, self._drag_state["index"]),
+            event.ydata,
+        )
+
+    def _on_canvas_release(self, event) -> None:
+        if getattr(event, "button", None) != 1:
+            return
+        self._drag_state = None
 
     @staticmethod
     def _update_polygon(polygon, angles: np.ndarray, values: np.ndarray) -> None:
@@ -608,6 +706,24 @@ class LoveLanguageApp:
                 label=receiving_label,
             )
             receiving_fill = ax.fill(angles, receiving_values, color="#4C72B0", alpha=0.25)[0]
+            giving_handle = ax.scatter(
+                angles[:-1],
+                giving_values[:-1],
+                s=80,
+                color="#55A868",
+                edgecolors="white",
+                linewidths=1.2,
+                zorder=5,
+            )
+            receiving_handle = ax.scatter(
+                angles[:-1],
+                receiving_values[:-1],
+                s=80,
+                color="#4C72B0",
+                edgecolors="white",
+                linewidths=1.2,
+                zorder=5,
+            )
             legend = ax.legend(
                 loc="upper left",
                 bbox_to_anchor=(1.02, 1.02),
@@ -615,23 +731,37 @@ class LoveLanguageApp:
                 frameon=True,
             )
             artists = {
+                "axis": ax,
                 "giving_line": giving_line,
                 "giving_fill": giving_fill,
+                "giving_handle": giving_handle,
                 "receiving_line": receiving_line,
                 "receiving_fill": receiving_fill,
+                "receiving_handle": receiving_handle,
                 "legend": legend,
             }
             self._plot_artists[key] = artists
         else:
+            artists["axis"] = ax
             giving_line = artists["giving_line"]
             giving_line.set_data(angles, giving_values)
             giving_line.set_label(giving_label)
             self._update_polygon(artists["giving_fill"], angles, giving_values)
+            giving_handle = artists.get("giving_handle")
+            if giving_handle is not None:
+                giving_handle.set_offsets(
+                    np.column_stack((angles[:-1], giving_values[:-1]))
+                )
 
             receiving_line = artists["receiving_line"]
             receiving_line.set_data(angles, receiving_values)
             receiving_line.set_label(receiving_label)
             self._update_polygon(artists["receiving_fill"], angles, receiving_values)
+            receiving_handle = artists.get("receiving_handle")
+            if receiving_handle is not None:
+                receiving_handle.set_offsets(
+                    np.column_stack((angles[:-1], receiving_values[:-1]))
+                )
 
             legend = artists["legend"]
             legend.remove()
@@ -644,6 +774,17 @@ class LoveLanguageApp:
 
         ax.set_title(title, pad=15, fontsize=11)
 
+    def _update_handle_visibility(self) -> None:
+        active_person = self._active_person_var.get()
+        for (person_key, _), (axis_key, handle_key) in self._handle_lookup.items():
+            artists = self._plot_artists.get(axis_key)
+            if not artists:
+                continue
+            handle = artists.get(handle_key)
+            if handle is None:
+                continue
+            handle.set_visible(person_key == active_person)
+
     def _render_plot(
         self,
         person_a: PersonProfile,
@@ -654,9 +795,9 @@ class LoveLanguageApp:
         person_b_loop_giving = close_loop(person_b.giving)
         person_b_loop_receiving = close_loop(person_b.receiving)
 
-        angles = np.asarray(polar_angles(), dtype=float)
+        angles = self._angles
 
-        self._ensure_plot_canvas(angles)
+        self._ensure_plot_canvas()
 
         if not self._axes:
             return
@@ -699,6 +840,7 @@ class LoveLanguageApp:
             f"{person_a.name} Receiving",
         )
 
+        self._update_handle_visibility()
         if self.canvas is not None:
             self.canvas.draw_idle()
 
