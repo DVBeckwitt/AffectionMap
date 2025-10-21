@@ -584,7 +584,6 @@ class LoveLanguageApp:
         explanation = build_explanation(person_a, person_b, corr_a_to_b, corr_b_to_a)
         self.text_var.set(explanation)
         self._insights_current = True
-        self._update_scale_markers(person_a, person_b, corr_a_to_b, corr_b_to_a)
 
     @staticmethod
     def _uses_default_scores(profile: PersonProfile) -> bool:
@@ -849,6 +848,9 @@ class LoveLanguageApp:
         person_b_loop_giving = close_loop(person_b.giving)
         person_b_loop_receiving = close_loop(person_b.receiving)
 
+        corr_a_to_b = correlation(person_a.giving, person_b.receiving)
+        corr_b_to_a = correlation(person_b.giving, person_a.receiving)
+
         angles = self._angles
 
         self._ensure_plot_canvas()
@@ -856,19 +858,7 @@ class LoveLanguageApp:
         if not self._axes:
             return
 
-        self._scale_markers["a_to_b"]["label_text"] = self._format_scale_label(
-            person_a.name,
-            person_b.name,
-            self._default_names["person_a"],
-            self._default_names["person_b"],
-        )
-        self._scale_markers["b_to_a"]["label_text"] = self._format_scale_label(
-            person_b.name,
-            person_a.name,
-            self._default_names["person_b"],
-            self._default_names["person_a"],
-        )
-        self._reposition_scale_markers()
+        self._update_scale_markers(person_a, person_b, corr_a_to_b, corr_b_to_a)
 
         title_left = f"{person_a.name} → {person_b.name}"
         title_right = f"{person_b.name} → {person_a.name}"
