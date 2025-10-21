@@ -91,7 +91,8 @@ class LoveLanguageApp:
             section,
             text=(
                 "Use the sliders to choose how strongly each love language resonates, from "
-                "Not at all to Essential (0 to 10)."
+                "Not at all to Essential (0 to 10). Points near the edge of the radar "
+                "charts show love languages that matter more."
             ),
             wraplength=720,
         )
@@ -567,6 +568,15 @@ class LoveLanguageApp:
             fontweight="bold",
         )
         figure.subplots_adjust(left=0.08, right=0.78, top=0.84, bottom=0.12, wspace=0.45)
+
+        figure.text(
+            0.5,
+            0.02,
+            "Farther from the center means that love language carries more importance.",
+            ha="center",
+            fontsize=9,
+            color="#333333",
+        )
 
         self._figure = figure
         self._axes = axes_tuple
