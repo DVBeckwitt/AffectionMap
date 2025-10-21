@@ -126,11 +126,16 @@ class LoveLanguageApp:
                 row=idx, column=0, padx=(0, 10), pady=2, sticky=tk.W
             )
 
-            giving_container, giving_slider = self._create_slider_widget(frame)
+            show_markers = idx == len(CATEGORIES) + 1
+            giving_container, giving_slider = self._create_slider_widget(
+                frame, show_markers=show_markers
+            )
             giving_container.grid(row=idx, column=1, padx=5, pady=2, sticky=tk.EW)
             giving_sliders.append(giving_slider)
 
-            receiving_container, receiving_slider = self._create_slider_widget(frame)
+            receiving_container, receiving_slider = self._create_slider_widget(
+                frame, show_markers=show_markers
+            )
             receiving_container.grid(row=idx, column=2, padx=5, pady=2, sticky=tk.EW)
             receiving_sliders.append(receiving_slider)
 
@@ -140,7 +145,9 @@ class LoveLanguageApp:
             "receiving": receiving_sliders,
         }
 
-    def _create_slider_widget(self, parent: ttk.Frame) -> Tuple[ttk.Frame, ttk.Scale]:
+    def _create_slider_widget(
+        self, parent: ttk.Frame, *, show_markers: bool = True
+    ) -> Tuple[ttk.Frame, ttk.Scale]:
         markers = [
             "Not at all",
             "A little",
@@ -161,13 +168,14 @@ class LoveLanguageApp:
         value_label = ttk.Label(container, textvariable=display_var, width=6, anchor=tk.E)
         value_label.grid(row=0, column=1, padx=(8, 0))
 
-        legend = ttk.Frame(container)
-        legend.grid(row=1, column=0, columnspan=2, sticky=tk.EW, pady=(4, 0))
-        for idx, label in enumerate(markers):
-            legend.columnconfigure(idx, weight=1)
-            ttk.Label(legend, text=label, font=("Helvetica", 8)).grid(
-                row=0, column=idx
-            )
+        if show_markers:
+            legend = ttk.Frame(container)
+            legend.grid(row=1, column=0, columnspan=2, sticky=tk.EW, pady=(4, 0))
+            for idx, label in enumerate(markers):
+                legend.columnconfigure(idx, weight=1)
+                ttk.Label(legend, text=label, font=("Helvetica", 8)).grid(
+                    row=0, column=idx
+                )
 
         def _update_display(value: str) -> None:
             rounded = round(float(value), 2)
