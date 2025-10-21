@@ -556,9 +556,18 @@ class LoveLanguageApp:
         axes_array = figure.subplots(1, 2, subplot_kw={"projection": "polar"})
         axes_tuple = tuple(np.ravel(axes_array))
 
+        category_angles = np.degrees(angles[:-1])
+
         for ax in axes_tuple:
-            ax.set_xticks(angles[:-1])
-            ax.set_xticklabels(CATEGORIES, fontsize=8)
+            labels = ax.set_thetagrids(
+                category_angles,
+                labels=CATEGORIES,
+                frac=1.1,
+            )
+            for label in labels:
+                label.set_fontsize(9)
+
+            ax.tick_params(axis="x", pad=4)
             ax.set_yticks(np.arange(0, 11, 2))
             ax.set_ylim(0, 10)
 
