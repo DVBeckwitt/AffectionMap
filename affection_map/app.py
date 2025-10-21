@@ -6,7 +6,6 @@ from typing import Dict, List, Optional, Tuple, cast
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
-from matplotlib.lines import Line2D
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -35,6 +34,25 @@ class LoveLanguageApp:
         self.text_var = tk.StringVar()
         self._live_update_job: Optional[str] = None
         self._insights_current = False
+        self.scale_canvas: tk.Canvas | None = None
+        self._scale_markers: Dict[str, Dict[str, object | None]] = {
+            "a_to_b": {
+                "value": None,
+                "marker": None,
+                "label": None,
+                "label_text": "",
+                "color": "#C44E52",
+            },
+            "b_to_a": {
+                "value": None,
+                "marker": None,
+                "label": None,
+                "label_text": "",
+                "color": "#4C72B0",
+            },
+        }
+        self._scale_margin = 35
+        self._scale_mid_y = 46
 
         self._build_layout()
 
@@ -206,20 +224,178 @@ class LoveLanguageApp:
         )
         self.explanation_label.pack(anchor=tk.W, pady=(10, 0))
 
-        scale_description = (
-            "Correlation scale (r):\n"
-            "-1 – Opposite priorities; when one values a language more, the other values it less.\n"
-            "0 – No consistent relationship between the two sets of priorities.\n"
-            "+1 – Perfect alignment; both people value each language similarly."
+        self._create_correlation_scale(explanation_frame)
+
+    def _create_correlation_scale(self, parent: ttk.Frame) -> None:
+        scale_container = ttk.Frame(parent)
+        scale_container.pack(anchor=tk.W, fill=tk.X, pady=(15, 0))
+
+        title = ttk.Label(
+            scale_container,
+            text="Correlation scale (r)",
+            font=("Helvetica", 11, "bold"),
         )
-        self.correlation_scale_label = ttk.Label(
-            explanation_frame,
-            text=scale_description,
-            wraplength=320,
-            justify=tk.LEFT,
-            font=("Helvetica", 9),
+        title.pack(anchor=tk.W)
+
+        self.scale_canvas = tk.Canvas(
+            scale_container,
+            height=110,
+            highlightthickness=0,
         )
-        self.correlation_scale_label.pack(anchor=tk.W, pady=(15, 0))
+        self.scale_canvas.pack(fill=tk.X, expand=False, pady=(8, 0))
+        self.scale_canvas.bind("<Configure>", self._redraw_scale)
+        self._redraw_scale()
+
+    def _redraw_scale(self, event: tk.Event | None = None) -> None:
+        if self.scale_canvas is None:
+            return
+
+        canvas = self.scale_canvas
+        canvas.delete("scale_static")
+
+        width = canvas.winfo_width()
+        if width <= 2:
+            width = int(canvas.cget("width"))
+
+        margin = self._scale_margin
+        mid_y = self._scale_mid_y
+
+        canvas.create_line(
+            margin,
+            mid_y,
+            width - margin,
+            mid_y,
+            fill="#444444",
+            width=2,
+            tags="scale_static",
+        )
+
+        labels = {
+            -1.0: "Opposite priorities",
+            0.0: "No consistent relationship",
+            1.0: "Perfect alignment",
+        }
+
+        for value, description in labels.items():
+            position = self._scale_value_to_x(value)
+            canvas.create_line(
+                position,
+                mid_y - 8,
+                position,
+                mid_y + 8,
+                fill="#444444",
+                width=2,
+                tags="scale_static",
+            )
+            display_value = "0" if value == 0 else f"{value:+.0f}"
+            canvas.create_text(
+                position,
+                mid_y - 18,
+                text=display_value,
+                font=("Helvetica", 10, "bold"),
+                fill="#444444",
+                tags="scale_static",
+            )
+            canvas.create_text(
+                position,
+                mid_y + 26,
+                text=description,
+                font=("Helvetica", 9),
+                fill="#444444",
+                tags="scale_static",
+            )
+
+        self._reposition_scale_markers()
+
+    def _scale_value_to_x(self, value: float) -> float:
+        if self.scale_canvas is None:
+            return float(self._scale_margin)
+
+        width = self.scale_canvas.winfo_width()
+        if width <= 2:
+            width = int(self.scale_canvas.cget("width"))
+
+        span = width - 2 * self._scale_margin
+        if span <= 0:
+            span = 1
+
+        normalized = (np.clip(value, -1.0, 1.0) + 1) / 2
+        return self._scale_margin + normalized * span
+
+    def _reposition_scale_markers(self) -> None:
+        if self.scale_canvas is None:
+            return
+
+        for key in self._scale_markers:
+            self._draw_scale_marker(key)
+
+    def _draw_scale_marker(self, key: str) -> None:
+        if self.scale_canvas is None:
+            return
+
+        marker_info = self._scale_markers[key]
+        marker = marker_info.get("marker")
+        label = marker_info.get("label")
+        if marker is not None:
+            self.scale_canvas.delete(marker)
+            marker_info["marker"] = None
+        if label is not None:
+            self.scale_canvas.delete(label)
+            marker_info["label"] = None
+
+        value = marker_info.get("value")
+        if value is None:
+            return
+
+        position = self._scale_value_to_x(cast(float, value))
+        radius = 6
+        marker = self.scale_canvas.create_oval(
+            position - radius,
+            self._scale_mid_y - radius,
+            position + radius,
+            self._scale_mid_y + radius,
+            fill=cast(str, marker_info["color"]),
+            outline="",
+        )
+        marker_info["marker"] = marker
+
+        label_text = cast(str, marker_info.get("label_text", ""))
+        if label_text:
+            label = self.scale_canvas.create_text(
+                position,
+                self._scale_mid_y - 32,
+                text=label_text,
+                font=("Helvetica", 9, "bold"),
+                fill=cast(str, marker_info["color"]),
+            )
+            marker_info["label"] = label
+
+    def _update_scale_markers(
+        self,
+        person_a: PersonProfile,
+        person_b: PersonProfile,
+        corr_a_to_b: float,
+        corr_b_to_a: float,
+    ) -> None:
+        if self.scale_canvas is None:
+            return
+
+        markers = {
+            "a_to_b": (
+                corr_a_to_b,
+                f"{person_a.name} → {person_b.name}: r = {corr_a_to_b:.2f}",
+            ),
+            "b_to_a": (
+                corr_b_to_a,
+                f"{person_b.name} → {person_a.name}: r = {corr_b_to_a:.2f}",
+            ),
+        }
+
+        for key, (value, label_text) in markers.items():
+            marker_info = self._scale_markers[key]
+            marker_info["value"] = value
+            marker_info["label_text"] = label_text
+            self._draw_scale_marker(key)
 
     def _collect_slider_values(self, sliders: List[ttk.Scale]) -> List[float]:
         values: List[float] = []
@@ -265,7 +441,7 @@ class LoveLanguageApp:
         self._live_update_job = None
         person_a = self._gather_profile("person_a", require_name=False)
         person_b = self._gather_profile("person_b", require_name=False)
-        self._render_plot(person_a, person_b, correlations=None)
+        self._render_plot(person_a, person_b)
         if self._insights_current:
             self.text_var.set(
                 "Values updated. Click Generate Compatibility Report to refresh the insights."
@@ -301,11 +477,12 @@ class LoveLanguageApp:
         corr_a_to_b = correlation(person_a.giving, person_b.receiving)
         corr_b_to_a = correlation(person_b.giving, person_a.receiving)
 
-        self._render_plot(person_a, person_b, correlations=(corr_a_to_b, corr_b_to_a))
+        self._render_plot(person_a, person_b)
 
         explanation = build_explanation(person_a, person_b, corr_a_to_b, corr_b_to_a)
         self.text_var.set(explanation)
         self._insights_current = True
+        self._update_scale_markers(person_a, person_b, corr_a_to_b, corr_b_to_a)
 
     @staticmethod
     def _uses_default_scores(profile: PersonProfile) -> bool:
@@ -346,91 +523,6 @@ class LoveLanguageApp:
     def _update_polygon(polygon, angles: np.ndarray, values: np.ndarray) -> None:
         polygon.set_xy(np.column_stack((angles, values)))
 
-    def _clear_scale_artists(self, artists: Dict[str, object]) -> None:
-        scale_artists = artists.get("scale_artists")
-        if scale_artists:
-            for element in cast(List[object], scale_artists):
-                element.remove()
-        artists["scale_artists"] = []
-
-    def _update_correlation_scale(
-        self,
-        ax,
-        artists: Dict[str, object],
-        correlation_value: float | None,
-    ) -> None:
-        if correlation_value is None:
-            if artists:
-                self._clear_scale_artists(artists)
-            return
-
-        start_x, end_x = 0.2, 0.8
-        y = -0.12
-
-        self._clear_scale_artists(artists)
-        scale_artists = []
-
-        base_line = Line2D(
-            [start_x, end_x],
-            [y, y],
-            transform=ax.transAxes,
-            color="#444444",
-            linewidth=1,
-        )
-        ax.add_line(base_line)
-        scale_artists.append(base_line)
-
-        for tick_value in (-1, 0, 1):
-            position = start_x + ((tick_value + 1) / 2) * (end_x - start_x)
-            tick = Line2D(
-                [position, position],
-                [y - 0.025, y + 0.025],
-                transform=ax.transAxes,
-                color="#444444",
-                linewidth=1,
-            )
-            ax.add_line(tick)
-            scale_artists.append(tick)
-
-            label = ax.text(
-                position,
-                y - 0.055,
-                f"{tick_value:+.0f}" if tick_value else "0",
-                transform=ax.transAxes,
-                ha="center",
-                va="top",
-                fontsize=9,
-            )
-            scale_artists.append(label)
-
-        marker_position = start_x + ((np.clip(correlation_value, -1.0, 1.0) + 1) / 2) * (
-            end_x - start_x
-        )
-        marker = Line2D(
-            [marker_position],
-            [y],
-            marker="o",
-            markersize=6,
-            color="#C44E52",
-            transform=ax.transAxes,
-        )
-        ax.add_line(marker)
-        scale_artists.append(marker)
-
-        marker_label = ax.text(
-            0.5,
-            y - 0.12,
-            f"r = {correlation_value:.2f}",
-            transform=ax.transAxes,
-            ha="center",
-            va="top",
-            fontsize=9,
-            color="#C44E52",
-        )
-        scale_artists.append(marker_label)
-
-        artists["scale_artists"] = scale_artists
-
     def _update_profile_plot(
         self,
         key: str,
@@ -441,7 +533,6 @@ class LoveLanguageApp:
         title: str,
         giving_label: str,
         receiving_label: str,
-        correlation_value: float | None,
     ) -> None:
         artists = self._plot_artists.get(key)
         if not artists:
@@ -468,7 +559,6 @@ class LoveLanguageApp:
                 "receiving_line": receiving_line,
                 "receiving_fill": receiving_fill,
                 "legend": legend,
-                "scale_artists": [],
             }
             self._plot_artists[key] = artists
         else:
@@ -487,14 +577,11 @@ class LoveLanguageApp:
             artists["legend"] = ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.1))
 
         ax.set_title(title, pad=15, fontsize=11)
-        self._update_correlation_scale(ax, artists, correlation_value)
 
     def _render_plot(
         self,
         person_a: PersonProfile,
         person_b: PersonProfile,
-        *,
-        correlations: Tuple[float, float] | None,
     ) -> None:
         person_a_loop_giving = close_loop(person_a.giving)
         person_a_loop_receiving = close_loop(person_a.receiving)
@@ -519,7 +606,6 @@ class LoveLanguageApp:
             title_left,
             f"{person_a.name} Giving",
             f"{person_b.name} Receiving",
-            correlations[0] if correlations is not None else None,
         )
 
         self._update_profile_plot(
@@ -531,7 +617,6 @@ class LoveLanguageApp:
             title_right,
             f"{person_b.name} Giving",
             f"{person_a.name} Receiving",
-            correlations[1] if correlations is not None else None,
         )
 
         if self.canvas is not None:
