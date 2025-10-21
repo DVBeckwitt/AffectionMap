@@ -35,6 +35,7 @@ class LoveLanguageApp:
         self._live_update_job: Optional[str] = None
         self._insights_current = False
         self.scale_canvas: tk.Canvas | None = None
+        self.canvas_container: ttk.Frame | None = None
         self._default_names = {"person_a": "A", "person_b": "B"}
         self._switch_label_vars: Dict[str, tk.StringVar] = {}
         self._switch_label_widgets: Dict[str, ttk.Label] = {}
@@ -271,9 +272,6 @@ class LoveLanguageApp:
 
         content = ttk.Frame(section)
         content.pack(fill=tk.X)
-        content.columnconfigure(0, weight=0)
-        content.columnconfigure(1, weight=1)
-        content.rowconfigure(0, weight=1)
 
         button = ttk.Button(
             content,
@@ -297,9 +295,6 @@ class LoveLanguageApp:
         )
         save_button.grid(row=1, column=0, sticky=tk.W)
 
-        scale_container = self._create_correlation_scale(content)
-        scale_container.grid(row=0, column=1, sticky=tk.NSEW, padx=(20, 0), pady=10)
-
     def _create_results_section(self, parent: ttk.Frame) -> None:
         section = ttk.Frame(parent)
         section.pack(fill=tk.BOTH, expand=True)
@@ -308,6 +303,12 @@ class LoveLanguageApp:
         self.plot_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         self._create_active_profile_switch(self.plot_frame)
+
+        self.canvas_container = ttk.Frame(self.plot_frame)
+        self.canvas_container.pack(fill=tk.BOTH, expand=True)
+
+        scale_container = self._create_correlation_scale(self.plot_frame)
+        scale_container.pack(fill=tk.X, pady=(12, 0))
 
         explanation_frame = ttk.Frame(section, padding=(15, 0, 0, 0))
         explanation_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
@@ -620,7 +621,9 @@ class LoveLanguageApp:
         self._figure = figure
         self._axes = axes_tuple
 
-        self.canvas = FigureCanvasTkAgg(figure, master=self.plot_frame)
+        parent = self.canvas_container or self.plot_frame
+
+        self.canvas = FigureCanvasTkAgg(figure, master=parent)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self._connect_canvas_events()
