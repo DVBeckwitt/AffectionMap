@@ -17,6 +17,7 @@ from .analysis import (
     correlation,
     polar_angles,
 )
+from .profile_io import dump_profile_to_file, load_profile_from_file
 
 
 class LoveLanguageApp:
@@ -270,6 +271,21 @@ class LoveLanguageApp:
         }
 
         self._profiles[key] = profile_info
+
+        controls = ttk.Frame(frame)
+        controls.pack(anchor=tk.W, pady=(0, 4))
+
+        ttk.Button(
+            controls,
+            text="Import Profile…",
+            command=lambda person_key=key: self._on_import_profile(person_key),
+        ).grid(row=0, column=0, padx=(0, 8), pady=(0, 4))
+
+        ttk.Button(
+            controls,
+            text="Save Profile…",
+            command=lambda person_key=key: self._on_save_profile(person_key),
+        ).grid(row=0, column=1, pady=(0, 4))
 
     def _create_action_section(self, parent: ttk.Frame) -> None:
         section = ttk.Frame(parent)
@@ -552,12 +568,13 @@ class LoveLanguageApp:
 
     def _gather_profile(self, key: str, *, require_name: bool) -> PersonProfile:
         profile_info = self._profiles[key]
-        name_entry = cast(ttk.Entry, profile_info["name_entry"])
+        name_entry = cast(Optional[ttk.Entry], profile_info.get("name_entry"))
         name_var = cast(tk.StringVar, profile_info["name_var"])
         name = name_var.get().strip()
         if not name:
             if require_name:
-                name_entry.focus_set()
+                if name_entry is not None:
+                    name_entry.focus_set()
                 default_label = "Person A" if key == "person_a" else "Person B"
                 raise ValueError(
                     f"Please enter a name for {default_label} before generating a report."
@@ -573,6 +590,65 @@ class LoveLanguageApp:
         if profile.name:
             return profile
         raise ValueError("Invalid profile configuration.")
+
+    def _on_save_profile(self, key: str) -> None:
+        try:
+            profile = self._gather_profile(key, require_name=True)
+        except ValueError as error:  # pragma: no cover - GUI path
+            messagebox.showerror("Cannot save profile", str(error))
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            title="Save love language profile",
+            defaultextension=".json",
+            filetypes=[
+                ("AffectionMap Profile", "*.json"),
+                ("All Files", "*.*"),
+            ],
+        )
+
+        if not file_path:
+            return
+
+        try:
+            dump_profile_to_file(profile, file_path)
+        except OSError as error:  # pragma: no cover - GUI path
+            messagebox.showerror("Save failed", str(error))
+
+    def _on_import_profile(self, key: str) -> None:
+        file_path = filedialog.askopenfilename(
+            title="Import love language profile",
+            filetypes=[
+                ("AffectionMap Profile", "*.json"),
+                ("All Files", "*.*"),
+            ],
+        )
+
+        if not file_path:
+            return
+
+        try:
+            profile = load_profile_from_file(file_path)
+        except (OSError, ValueError) as error:  # pragma: no cover - GUI path
+            messagebox.showerror("Import failed", str(error))
+            return
+
+        self._apply_imported_profile(key, profile)
+
+    def _apply_imported_profile(self, key: str, profile: PersonProfile) -> None:
+        profile_info = self._profiles.get(key)
+        if not profile_info:
+            return
+
+        name_var = cast(Optional[tk.StringVar], profile_info.get("name_var"))
+        if name_var is not None:
+            name_var.set(profile.name)
+
+        profile_info["giving"] = profile.giving.astype(float, copy=True)
+        profile_info["receiving"] = profile.receiving.astype(float, copy=True)
+
+        self._update_visuals_from_profiles()
+        self._mark_insights_stale()
 
     def _schedule_live_update(self) -> None:
         if self._live_update_job is not None:
