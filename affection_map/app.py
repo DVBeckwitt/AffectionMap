@@ -1,7 +1,7 @@
 """Graphical interface for exploring love language alignment."""
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -29,6 +29,8 @@ class LoveLanguageApp:
         self._input_widgets: Dict[str, Dict[str, List[ttk.Scale]]] = {}
         self.canvas: FigureCanvasTkAgg | None = None
         self.text_var = tk.StringVar()
+        self._live_update_job: Optional[str] = None
+        self._insights_current = False
 
         self._build_layout()
 
@@ -37,6 +39,11 @@ class LoveLanguageApp:
         # explanations) requires more room.
         self.master.update_idletasks()
         self.master.minsize(self.master.winfo_width(), self.master.winfo_height())
+        self.text_var.set(
+            "Adjust the sliders to explore how preferences shift. "
+            "Click Generate Compatibility Report for detailed insights."
+        )
+        self.master.after_idle(self._refresh_live_preview)
 
     def _build_layout(self) -> None:
         container = ttk.Frame(self.master, padding=20)
@@ -144,7 +151,11 @@ class LoveLanguageApp:
             rounded = round(float(value), 2)
             display_var.set(f"{rounded:.2f}")
 
-        slider.configure(command=_update_display)
+        def _on_slider_change(value: str) -> None:
+            _update_display(value)
+            self._schedule_live_update()
+
+        slider.configure(command=_on_slider_change)
         _update_display("5.0")
 
         return container, slider
@@ -153,8 +164,20 @@ class LoveLanguageApp:
         section = ttk.Frame(parent)
         section.pack(fill=tk.X, pady=(5, 15))
 
-        button = ttk.Button(section, text="Generate Compatibility Report", command=self._on_generate)
-        button.pack(pady=5)
+        style = ttk.Style()
+        style.configure(
+            "Generate.TButton",
+            font=("Helvetica", 12, "bold"),
+            padding=(20, 10),
+        )
+
+        button = ttk.Button(
+            section,
+            text="Generate Compatibility Report",
+            style="Generate.TButton",
+            command=self._on_generate,
+        )
+        button.pack(pady=10)
 
     def _create_results_section(self, parent: ttk.Frame) -> None:
         section = ttk.Frame(parent)
@@ -188,18 +211,44 @@ class LoveLanguageApp:
             values.append(value)
         return values
 
-    def _extract_profile(self, key: str) -> PersonProfile:
+    def _gather_profile(self, key: str, *, require_name: bool) -> PersonProfile:
         widgets = self._input_widgets[key]
         name_entry: ttk.Entry = widgets["name"]  # type: ignore[assignment]
         name = name_entry.get().strip()
         if not name:
-            name_entry.focus_set()
-            default_label = "Person A" if key == "person_a" else "Person B"
-            raise ValueError(f"Please enter a name for {default_label} before generating a report.")
+            if require_name:
+                name_entry.focus_set()
+                default_label = "Person A" if key == "person_a" else "Person B"
+                raise ValueError(
+                    f"Please enter a name for {default_label} before generating a report."
+                )
+            name = "Person A" if key == "person_a" else "Person B"
 
         giving = np.array(self._collect_slider_values(widgets["giving"]))
         receiving = np.array(self._collect_slider_values(widgets["receiving"]))
         return PersonProfile(name=name, giving=giving, receiving=receiving)
+
+    def _extract_profile(self, key: str) -> PersonProfile:
+        profile = self._gather_profile(key, require_name=True)
+        if profile.name:
+            return profile
+        raise ValueError("Invalid profile configuration.")
+
+    def _schedule_live_update(self) -> None:
+        if self._live_update_job is not None:
+            self.master.after_cancel(self._live_update_job)
+        self._live_update_job = self.master.after(75, self._refresh_live_preview)
+
+    def _refresh_live_preview(self) -> None:
+        self._live_update_job = None
+        person_a = self._gather_profile("person_a", require_name=False)
+        person_b = self._gather_profile("person_b", require_name=False)
+        self._render_plot(person_a, person_b, correlations=None)
+        if self._insights_current:
+            self.text_var.set(
+                "Values updated. Click Generate Compatibility Report to refresh the insights."
+            )
+            self._insights_current = False
 
     def _on_generate(self) -> None:
         try:
@@ -227,51 +276,14 @@ class LoveLanguageApp:
         self._render_report(person_a, person_b)
 
     def _render_report(self, person_a: PersonProfile, person_b: PersonProfile) -> None:
-        person_a_loop_giving = close_loop(person_a.giving)
-        person_a_loop_receiving = close_loop(person_a.receiving)
-        person_b_loop_giving = close_loop(person_b.giving)
-        person_b_loop_receiving = close_loop(person_b.receiving)
-
         corr_a_to_b = correlation(person_a.giving, person_b.receiving)
         corr_b_to_a = correlation(person_b.giving, person_a.receiving)
 
-        if self.canvas:
-            self.canvas.get_tk_widget().destroy()
-
-        figure = Figure(figsize=(7.5, 5), dpi=100)
-        axes = figure.subplots(1, 2, subplot_kw={"projection": "polar"})
-
-        angles = polar_angles()
-
-        self._plot_profile(
-            axes[0],
-            angles,
-            person_a_loop_giving,
-            person_b_loop_receiving,
-            f"{person_a.name} → {person_b.name} (r = {corr_a_to_b:.2f})",
-            f"{person_a.name} Giving",
-            f"{person_b.name} Receiving",
-        )
-
-        self._plot_profile(
-            axes[1],
-            angles,
-            person_b_loop_giving,
-            person_a_loop_receiving,
-            f"{person_b.name} → {person_a.name} (r = {corr_b_to_a:.2f})",
-            f"{person_b.name} Giving",
-            f"{person_a.name} Receiving",
-        )
-
-        figure.suptitle("Love Language Alignment: Giving vs Receiving", fontsize=14, fontweight="bold")
-        figure.tight_layout()
-
-        self.canvas = FigureCanvasTkAgg(figure, master=self.plot_frame)
-        self.canvas.draw()
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self._render_plot(person_a, person_b, correlations=(corr_a_to_b, corr_b_to_a))
 
         explanation = build_explanation(person_a, person_b, corr_a_to_b, corr_b_to_a)
         self.text_var.set(explanation)
+        self._insights_current = True
 
     @staticmethod
     def _uses_default_scores(profile: PersonProfile) -> bool:
@@ -300,6 +312,60 @@ class LoveLanguageApp:
         ax.set_yticks(np.arange(0, 11, 2))
         ax.set_ylim(0, 10)
         ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.1))
+
+    def _render_plot(
+        self,
+        person_a: PersonProfile,
+        person_b: PersonProfile,
+        *,
+        correlations: Tuple[float, float] | None,
+    ) -> None:
+        person_a_loop_giving = close_loop(person_a.giving)
+        person_a_loop_receiving = close_loop(person_a.receiving)
+        person_b_loop_giving = close_loop(person_b.giving)
+        person_b_loop_receiving = close_loop(person_b.receiving)
+
+        if self.canvas:
+            self.canvas.get_tk_widget().destroy()
+
+        figure = Figure(figsize=(7.5, 5), dpi=100)
+        axes = figure.subplots(1, 2, subplot_kw={"projection": "polar"})
+
+        angles = polar_angles()
+
+        title_left = f"{person_a.name} → {person_b.name}"
+        title_right = f"{person_b.name} → {person_a.name}"
+        if correlations is not None:
+            corr_a_to_b, corr_b_to_a = correlations
+            title_left += f" (r = {corr_a_to_b:.2f})"
+            title_right += f" (r = {corr_b_to_a:.2f})"
+
+        self._plot_profile(
+            axes[0],
+            angles,
+            person_a_loop_giving,
+            person_b_loop_receiving,
+            title_left,
+            f"{person_a.name} Giving",
+            f"{person_b.name} Receiving",
+        )
+
+        self._plot_profile(
+            axes[1],
+            angles,
+            person_b_loop_giving,
+            person_a_loop_receiving,
+            title_right,
+            f"{person_b.name} Giving",
+            f"{person_a.name} Receiving",
+        )
+
+        figure.suptitle("Love Language Alignment: Giving vs Receiving", fontsize=14, fontweight="bold")
+        figure.tight_layout()
+
+        self.canvas = FigureCanvasTkAgg(figure, master=self.plot_frame)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
 
 def main() -> None:
