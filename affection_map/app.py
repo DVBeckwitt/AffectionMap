@@ -142,7 +142,7 @@ class LoveLanguageApp:
         for idx, label in enumerate(markers):
             legend.columnconfigure(idx, weight=1)
             ttk.Label(legend, text=label, font=("Helvetica", 8)).grid(
-                row=0, column=idx, sticky=tk.CENTER
+                row=0, column=idx
             )
 
         def _update_display(value: str) -> None:
