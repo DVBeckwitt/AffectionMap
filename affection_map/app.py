@@ -1,32 +1,22 @@
 """Graphical interface for exploring love language alignment."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
-from scipy.stats import pearsonr
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-CATEGORIES: List[str] = [
-    "Words of Affirmation",
-    "Acts of Service",
-    "Receiving Gifts",
-    "Quality Time",
-    "Physical Touch",
-]
-
-
-@dataclass
-class PersonProfile:
-    """Container for an individual's love language values."""
-
-    name: str
-    giving: np.ndarray
-    receiving: np.ndarray
+from .analysis import (
+    CATEGORIES,
+    PersonProfile,
+    build_explanation,
+    close_loop,
+    correlation,
+    polar_angles,
+)
 
 
 class LoveLanguageApp:
@@ -200,9 +190,12 @@ class LoveLanguageApp:
 
     def _extract_profile(self, key: str) -> PersonProfile:
         widgets = self._input_widgets[key]
-        name = widgets["name"].get().strip()  # type: ignore[assignment]
+        name_entry: ttk.Entry = widgets["name"]  # type: ignore[assignment]
+        name = name_entry.get().strip()
         if not name:
-            name = "Person A" if key == "person_a" else "Person B"
+            name_entry.focus_set()
+            default_label = "Person A" if key == "person_a" else "Person B"
+            raise ValueError(f"Please enter a name for {default_label} before generating a report.")
 
         giving = np.array(self._collect_slider_values(widgets["giving"]))
         receiving = np.array(self._collect_slider_values(widgets["receiving"]))
@@ -216,16 +209,31 @@ class LoveLanguageApp:
             messagebox.showerror("Invalid input", str(error))
             return
 
+        untouched_profiles = [
+            profile.name
+            for profile in (person_a, person_b)
+            if self._uses_default_scores(profile)
+        ]
+        if untouched_profiles:
+            messagebox.showwarning(
+                "Adjust the sliders",
+                (
+                    "The following profiles still have every slider at 5.00: "
+                    + ", ".join(untouched_profiles)
+                    + ". Adjust the sliders to reflect real preferences before relying on this report."
+                ),
+            )
+
         self._render_report(person_a, person_b)
 
     def _render_report(self, person_a: PersonProfile, person_b: PersonProfile) -> None:
-        person_a_loop_giving = self._close_loop(person_a.giving)
-        person_a_loop_receiving = self._close_loop(person_a.receiving)
-        person_b_loop_giving = self._close_loop(person_b.giving)
-        person_b_loop_receiving = self._close_loop(person_b.receiving)
+        person_a_loop_giving = close_loop(person_a.giving)
+        person_a_loop_receiving = close_loop(person_a.receiving)
+        person_b_loop_giving = close_loop(person_b.giving)
+        person_b_loop_receiving = close_loop(person_b.receiving)
 
-        corr_a_to_b = self._correlation(person_a.giving, person_b.receiving)
-        corr_b_to_a = self._correlation(person_b.giving, person_a.receiving)
+        corr_a_to_b = correlation(person_a.giving, person_b.receiving)
+        corr_b_to_a = correlation(person_b.giving, person_a.receiving)
 
         if self.canvas:
             self.canvas.get_tk_widget().destroy()
@@ -233,7 +241,7 @@ class LoveLanguageApp:
         figure = Figure(figsize=(7.5, 5), dpi=100)
         axes = figure.subplots(1, 2, subplot_kw={"projection": "polar"})
 
-        angles = self._angles()
+        angles = polar_angles()
 
         self._plot_profile(
             axes[0],
@@ -262,25 +270,15 @@ class LoveLanguageApp:
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        explanation = self._build_explanation(person_a, person_b, corr_a_to_b, corr_b_to_a)
+        explanation = build_explanation(person_a, person_b, corr_a_to_b, corr_b_to_a)
         self.text_var.set(explanation)
 
     @staticmethod
-    def _correlation(first: np.ndarray, second: np.ndarray) -> float:
-        if np.all(first == first[0]) or np.all(second == second[0]):
-            return 0.0
-        corr, _ = pearsonr(first, second)
-        return float(corr)
-
-    @staticmethod
-    def _close_loop(values: np.ndarray) -> np.ndarray:
-        return np.concatenate((values, [values[0]]))
-
-    @staticmethod
-    def _angles() -> List[float]:
-        angles = np.linspace(0, 2 * np.pi, len(CATEGORIES), endpoint=False).tolist()
-        angles += angles[:1]
-        return angles
+    def _uses_default_scores(profile: PersonProfile) -> bool:
+        return bool(
+            np.allclose(profile.giving, 5.0)
+            and np.allclose(profile.receiving, 5.0)
+        )
 
     def _plot_profile(
         self,
@@ -302,63 +300,6 @@ class LoveLanguageApp:
         ax.set_yticks(np.arange(0, 11, 2))
         ax.set_ylim(0, 10)
         ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.1))
-
-    def _build_explanation(
-        self,
-        person_a: PersonProfile,
-        person_b: PersonProfile,
-        corr_a_to_b: float,
-        corr_b_to_a: float,
-    ) -> str:
-        summary = [
-            self._interpret_correlation(
-                person_a.name,
-                person_b.name,
-                corr_a_to_b,
-                "how well what they like to give matches what their partner enjoys receiving",
-            ),
-            self._interpret_correlation(
-                person_b.name,
-                person_a.name,
-                corr_b_to_a,
-                "how well their giving style lands for their partner",
-            ),
-        ]
-
-        strongest_alignment = np.argmax((person_a.giving + person_b.receiving) / 2)
-        closest_alignment = np.argmin(np.abs(person_a.giving - person_b.receiving))
-        largest_gap = np.argmax(np.abs(person_a.giving - person_b.receiving))
-
-        summary.append(
-            f"\nGreatest shared enthusiasm: {CATEGORIES[strongest_alignment]} — both of you score "
-            "high here, so this language may feel especially natural together."
-        )
-        summary.append(
-            f"Most aligned expectations: {CATEGORIES[closest_alignment]} — your giving and receiving "
-            "scores are the closest match in this area."
-        )
-        summary.append(
-            f"Greatest mismatch: {CATEGORIES[largest_gap]} — focus on sharing preferences here to bridge "
-            "the gap between how one of you gives and the other prefers to receive."
-        )
-
-        return "\n\n".join(summary)
-
-    @staticmethod
-    def _interpret_correlation(giver: str, receiver: str, value: float, description: str) -> str:
-        strength = "low"
-        if value >= 0.75:
-            strength = "very strong"
-        elif value >= 0.5:
-            strength = "strong"
-        elif value >= 0.25:
-            strength = "moderate"
-        elif value <= -0.25:
-            strength = "challenging"
-
-        return (
-            f"{giver} → {receiver}: r = {value:.2f}. This indicates {strength} alignment in {description}."
-        )
 
 
 def main() -> None:
