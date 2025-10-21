@@ -560,6 +560,7 @@ class LoveLanguageApp:
             ax.set_xticklabels(CATEGORIES, fontsize=8)
             ax.set_yticks(np.arange(0, 11, 2))
             ax.set_ylim(0, 10)
+            ax.tick_params(axis="x", pad=12)
 
         figure.suptitle(
             "Love Language Alignment: Giving vs Receiving",
