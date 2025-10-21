@@ -403,8 +403,53 @@ class LoveLanguageApp:
         if self._scale_axis is None:
             return
 
+        self._update_scale_label_layout()
         for key in self._scale_markers:
             self._draw_scale_marker(key)
+
+    def _update_scale_label_layout(self) -> None:
+        if self._scale_axis is None:
+            return
+
+        active_markers: List[Tuple[str, float]] = []
+        for key, marker_info in self._scale_markers.items():
+            value = marker_info.get("value")
+            if value is None or not np.isfinite(value):
+                marker_info.pop("label_position", None)
+                marker_info.pop("label_y", None)
+                continue
+
+            x_position = self._scale_value_to_coordinate(cast(float, value))
+            marker_info["label_position"] = x_position
+            marker_info.setdefault("label_y", 0.42)
+            active_markers.append((key, x_position))
+
+        if not active_markers:
+            return
+
+        base_y = 0.42
+        row_step = 0.16
+        max_y = 0.66
+        min_separation = 0.2
+        rows: List[List[Tuple[str, float]]] = []
+
+        for key, x_position in sorted(active_markers, key=lambda item: item[1]):
+            row_index = 0
+            while row_index < len(rows):
+                row_positions = [existing_x for _, existing_x in rows[row_index]]
+                if all(abs(x_position - existing_x) >= min_separation for existing_x in row_positions):
+                    break
+                row_index += 1
+
+            if row_index == len(rows):
+                rows.append([])
+
+            rows[row_index].append((key, x_position))
+
+        for row_index, row in enumerate(rows):
+            y_position = min(base_y + row_index * row_step, max_y)
+            for key, _ in row:
+                self._scale_markers[key]["label_y"] = y_position
 
     def _draw_scale_marker(self, key: str) -> None:
         if self._scale_axis is None:
@@ -427,6 +472,8 @@ class LoveLanguageApp:
         x_position = self._scale_value_to_coordinate(cast(float, value))
         color = cast(str, marker_info["color"])
         label_text = cast(str, marker_info.get("label_text", ""))
+        label_x_position = cast(float, marker_info.get("label_position", x_position))
+        label_y_position = cast(float, marker_info.get("label_y", 0.42))
 
         if artist is None:
             artist = self._scale_axis.plot(
@@ -449,8 +496,8 @@ class LoveLanguageApp:
         if label_text:
             if label_artist is None:
                 label_artist = self._scale_axis.text(
-                    x_position,
-                    0.42,
+                    label_x_position,
+                    label_y_position,
                     label_text,
                     fontsize=9,
                     fontweight="bold",
@@ -461,7 +508,7 @@ class LoveLanguageApp:
                 )
                 marker_info["label_artist"] = label_artist
             else:
-                label_artist.set_position((x_position, 0.42))
+                label_artist.set_position((label_x_position, label_y_position))
                 label_artist.set_text(label_text)
                 label_artist.set_color(color)
         elif label_artist is not None:
