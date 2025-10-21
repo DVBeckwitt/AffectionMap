@@ -97,7 +97,6 @@ class LoveLanguageApp:
         header.pack(anchor=tk.W)
 
         self._create_input_section(container)
-        self._create_action_section(container)
         self._create_results_section(container)
 
     def _create_input_section(self, parent: ttk.Frame) -> None:
@@ -264,13 +263,6 @@ class LoveLanguageApp:
             self._schedule_live_update()
         name_var.trace_add("write", _on_name_change)
 
-        ttk.Label(
-            frame,
-            text="Drag the radar chart handles to adjust this person's giving and "
-            "receiving preferences.",
-            wraplength=240,
-        ).grid(row=1, column=0, columnspan=2, pady=(12, 0), sticky=tk.W)
-
         profile_info: Dict[str, object] = {
             "frame": frame,
             "name_var": name_var,
@@ -283,7 +275,7 @@ class LoveLanguageApp:
 
     def _create_action_section(self, parent: ttk.Frame) -> None:
         section = ttk.Frame(parent)
-        section.pack(fill=tk.X, pady=(5, 15))
+        section.pack(anchor=tk.W, fill=tk.X, pady=(0, 15))
 
         style = ttk.Style()
         style.configure(
@@ -293,7 +285,7 @@ class LoveLanguageApp:
         )
 
         content = ttk.Frame(section)
-        content.pack(fill=tk.X)
+        content.pack(anchor=tk.W, fill=tk.X)
 
         button = ttk.Button(
             content,
@@ -301,7 +293,7 @@ class LoveLanguageApp:
             style="Generate.TButton",
             command=self._on_generate,
         )
-        button.grid(row=0, column=0, sticky=tk.W, pady=10)
+        button.grid(row=0, column=0, sticky=tk.W, pady=(0, 8))
 
         style.configure(
             "Save.TButton",
@@ -334,6 +326,8 @@ class LoveLanguageApp:
 
         explanation_frame = ttk.Frame(section, padding=(15, 0, 0, 0))
         explanation_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        self._create_action_section(explanation_frame)
 
         explanation_title = ttk.Label(
             explanation_frame, text="Compatibility Insights", font=("Helvetica", 14, "bold")
