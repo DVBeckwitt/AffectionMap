@@ -35,13 +35,18 @@ class LoveLanguageApp:
     def __init__(self, master: tk.Tk) -> None:
         self.master = master
         self.master.title("AffectionMap – Love Language Alignment")
-        self.master.geometry("1100x720")
 
         self._input_widgets: Dict[str, Dict[str, List[ttk.Scale]]] = {}
         self.canvas: FigureCanvasTkAgg | None = None
         self.text_var = tk.StringVar()
 
         self._build_layout()
+
+        # Ensure the initial layout determines a comfortable minimum size while
+        # keeping the window resizable if additional content (like longer
+        # explanations) requires more room.
+        self.master.update_idletasks()
+        self.master.minsize(self.master.winfo_width(), self.master.winfo_height())
 
     def _build_layout(self) -> None:
         container = ttk.Frame(self.master, padding=20)
@@ -321,15 +326,20 @@ class LoveLanguageApp:
         ]
 
         strongest_alignment = np.argmax((person_a.giving + person_b.receiving) / 2)
-        weakest_alignment = np.argmin(np.abs(person_a.giving - person_b.receiving))
+        closest_alignment = np.argmin(np.abs(person_a.giving - person_b.receiving))
+        largest_gap = np.argmax(np.abs(person_a.giving - person_b.receiving))
 
         summary.append(
             f"\nGreatest shared enthusiasm: {CATEGORIES[strongest_alignment]} — both of you score "
             "high here, so this language may feel especially natural together."
         )
         summary.append(
-            f"Most aligned expectations: {CATEGORIES[weakest_alignment]} — your giving and receiving "
+            f"Most aligned expectations: {CATEGORIES[closest_alignment]} — your giving and receiving "
             "scores are the closest match in this area."
+        )
+        summary.append(
+            f"Greatest mismatch: {CATEGORIES[largest_gap]} — focus on sharing preferences here to bridge "
+            "the gap between how one of you gives and the other prefers to receive."
         )
 
         return "\n\n".join(summary)
