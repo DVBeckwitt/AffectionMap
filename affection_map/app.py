@@ -34,8 +34,8 @@ class LoveLanguageApp:
         self.text_var = tk.StringVar()
         self._live_update_job: Optional[str] = None
         self._insights_current = False
-        self.scale_canvas: tk.Canvas | None = None
         self.canvas_container: ttk.Frame | None = None
+        self._scale_axis = None
         self._default_names = {"person_a": "A", "person_b": "B"}
         self._switch_person_labels: Dict[str, ttk.Label] = {}
         self._switch_name_entries: Dict[str, ttk.Entry] = {}
@@ -55,21 +55,19 @@ class LoveLanguageApp:
         self._scale_markers: Dict[str, Dict[str, object | None]] = {
             "a_to_b": {
                 "value": None,
-                "marker": None,
-                "label": None,
+                "artist": None,
+                "label_artist": None,
                 "label_text": "A → B",
                 "color": "#C44E52",
             },
             "b_to_a": {
                 "value": None,
-                "marker": None,
-                "label": None,
+                "artist": None,
+                "label_artist": None,
                 "label_text": "B → A",
                 "color": "#4C72B0",
             },
         }
-        self._scale_margin = 35
-        self._scale_mid_y = 46
 
         self._build_layout()
 
@@ -329,9 +327,6 @@ class LoveLanguageApp:
         self.canvas_container = ttk.Frame(self.plot_frame)
         self.canvas_container.pack(fill=tk.BOTH, expand=True)
 
-        scale_container = self._create_correlation_scale(self.plot_frame)
-        scale_container.pack(fill=tk.X, pady=(12, 0))
-
         explanation_frame = ttk.Frame(section, padding=(15, 0, 0, 0))
         explanation_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
@@ -348,50 +343,17 @@ class LoveLanguageApp:
         )
         self.explanation_label.pack(anchor=tk.W, pady=(10, 0))
 
-    def _create_correlation_scale(self, parent: ttk.Frame) -> ttk.Frame:
-        scale_container = ttk.Frame(parent, padding=(0, 0, 0, 0))
+    def _setup_scale_axis(self, axis) -> None:
+        self._scale_axis = axis
+        axis.clear()
+        axis.set_xlim(-1.05, 1.05)
+        axis.set_ylim(-0.5, 0.7)
+        axis.set_xticks([])
+        axis.set_yticks([])
+        axis.axis("off")
+        axis.set_title("Correlation scale (r)", loc="left", fontsize=11, fontweight="bold", pad=16)
 
-        title = ttk.Label(
-            scale_container,
-            text="Correlation scale (r)",
-            font=("Helvetica", 11, "bold"),
-        )
-        title.pack(anchor=tk.W)
-
-        self.scale_canvas = tk.Canvas(
-            scale_container,
-            height=110,
-            highlightthickness=0,
-        )
-        self.scale_canvas.pack(fill=tk.X, expand=False, pady=(8, 0))
-        self.scale_canvas.bind("<Configure>", self._redraw_scale)
-        self._redraw_scale()
-
-        return scale_container
-
-    def _redraw_scale(self, event: tk.Event | None = None) -> None:
-        if self.scale_canvas is None:
-            return
-
-        canvas = self.scale_canvas
-        canvas.delete("scale_static")
-
-        width = canvas.winfo_width()
-        if width <= 2:
-            width = int(canvas.cget("width"))
-
-        margin = self._scale_margin
-        mid_y = self._scale_mid_y
-
-        canvas.create_line(
-            margin,
-            mid_y,
-            width - margin,
-            mid_y,
-            fill="#444444",
-            width=2,
-            tags="scale_static",
-        )
+        axis.hlines(0, -1.0, 1.0, color="#444444", linewidth=2, zorder=1)
 
         labels = {
             -1.0: "Opposite priorities",
@@ -400,98 +362,117 @@ class LoveLanguageApp:
         }
 
         for value, description in labels.items():
-            position = self._scale_value_to_x(value)
-            canvas.create_line(
-                position,
-                mid_y - 8,
-                position,
-                mid_y + 8,
-                fill="#444444",
-                width=2,
-                tags="scale_static",
-            )
+            axis.vlines(value, -0.08, 0.08, color="#444444", linewidth=2, zorder=1)
             display_value = "0" if value == 0 else f"{value:+.0f}"
-            canvas.create_text(
-                position,
-                mid_y - 18,
-                text=display_value,
-                font=("Helvetica", 10, "bold"),
-                fill="#444444",
-                tags="scale_static",
+            axis.text(
+                value,
+                0.18,
+                display_value,
+                fontsize=10,
+                fontweight="bold",
+                color="#444444",
+                ha="center",
+                va="bottom",
+                zorder=2,
             )
-            canvas.create_text(
-                position,
-                mid_y + 26,
-                text=description,
-                font=("Helvetica", 9),
-                fill="#444444",
-                tags="scale_static",
+            axis.text(
+                value,
+                -0.28,
+                description,
+                fontsize=9,
+                color="#444444",
+                ha="center",
+                va="top",
+                zorder=2,
             )
+
+        for marker_info in self._scale_markers.values():
+            artist = marker_info.get("artist")
+            if artist is not None:
+                try:
+                    artist.remove()
+                except ValueError:
+                    pass
+                marker_info["artist"] = None
+            label_artist = marker_info.get("label_artist")
+            if label_artist is not None:
+                label_artist.remove()
+                marker_info["label_artist"] = None
 
         self._reposition_scale_markers()
 
-    def _scale_value_to_x(self, value: float) -> float:
-        if self.scale_canvas is None:
-            return float(self._scale_margin)
-
-        width = self.scale_canvas.winfo_width()
-        if width <= 2:
-            width = int(self.scale_canvas.cget("width"))
-
-        span = width - 2 * self._scale_margin
-        if span <= 0:
-            span = 1
-
-        normalized = (np.clip(value, -1.0, 1.0) + 1) / 2
-        return self._scale_margin + normalized * span
+    @staticmethod
+    def _scale_value_to_coordinate(value: float) -> float:
+        return float(np.clip(value, -1.0, 1.0))
 
     def _reposition_scale_markers(self) -> None:
-        if self.scale_canvas is None:
+        if self._scale_axis is None:
             return
 
         for key in self._scale_markers:
             self._draw_scale_marker(key)
 
     def _draw_scale_marker(self, key: str) -> None:
-        if self.scale_canvas is None:
+        if self._scale_axis is None:
             return
 
         marker_info = self._scale_markers[key]
-        marker = marker_info.get("marker")
-        label = marker_info.get("label")
-        if marker is not None:
-            self.scale_canvas.delete(marker)
-            marker_info["marker"] = None
-        if label is not None:
-            self.scale_canvas.delete(label)
-            marker_info["label"] = None
-
         value = marker_info.get("value")
+        artist = marker_info.get("artist")
+        label_artist = marker_info.get("label_artist")
+
         if value is None:
+            if artist is not None:
+                artist.remove()
+                marker_info["artist"] = None
+            if label_artist is not None:
+                label_artist.remove()
+                marker_info["label_artist"] = None
             return
 
-        position = self._scale_value_to_x(cast(float, value))
-        radius = 6
-        marker = self.scale_canvas.create_oval(
-            position - radius,
-            self._scale_mid_y - radius,
-            position + radius,
-            self._scale_mid_y + radius,
-            fill=cast(str, marker_info["color"]),
-            outline="",
-        )
-        marker_info["marker"] = marker
-
+        x_position = self._scale_value_to_coordinate(cast(float, value))
+        color = cast(str, marker_info["color"])
         label_text = cast(str, marker_info.get("label_text", ""))
+
+        if artist is None:
+            artist = self._scale_axis.plot(
+                [x_position],
+                [0.0],
+                marker="o",
+                markersize=9,
+                color=color,
+                markeredgecolor="white",
+                markeredgewidth=1.2,
+                linestyle="",
+                zorder=5,
+            )[0]
+            marker_info["artist"] = artist
+        else:
+            artist.set_data([x_position], [0.0])
+            artist.set_color(color)
+            artist.set_markeredgecolor("white")
+
         if label_text:
-            label = self.scale_canvas.create_text(
-                position,
-                self._scale_mid_y - 32,
-                text=label_text,
-                font=("Helvetica", 9, "bold"),
-                fill=cast(str, marker_info["color"]),
-            )
-            marker_info["label"] = label
+            if label_artist is None:
+                label_artist = self._scale_axis.text(
+                    x_position,
+                    0.42,
+                    label_text,
+                    fontsize=9,
+                    fontweight="bold",
+                    color=color,
+                    ha="center",
+                    va="bottom",
+                    zorder=5,
+                )
+                marker_info["label_artist"] = label_artist
+            else:
+                label_artist.set_position((x_position, 0.42))
+                label_artist.set_text(label_text)
+                label_artist.set_color(color)
+        elif label_artist is not None:
+            label_artist.remove()
+            marker_info["label_artist"] = None
 
     def _update_scale_markers(
         self,
@@ -500,7 +481,7 @@ class LoveLanguageApp:
         corr_a_to_b: float,
         corr_b_to_a: float,
     ) -> None:
-        if self.scale_canvas is None:
+        if self._scale_axis is None:
             return
 
         labels = {
@@ -622,9 +603,11 @@ class LoveLanguageApp:
         if self.canvas is not None and self._axes is not None and self._figure is not None:
             return
 
-        figure = Figure(figsize=(7.5, 5), dpi=100)
-        axes_array = figure.subplots(1, 2, subplot_kw={"projection": "polar"})
-        axes_tuple = tuple(np.ravel(axes_array))
+        figure = Figure(figsize=(7.5, 5.6), dpi=100)
+        grid = figure.add_gridspec(nrows=2, ncols=2, height_ratios=[4, 1], hspace=0.35, wspace=0.45)
+        axes_tuple = tuple(
+            figure.add_subplot(grid[0, index], projection="polar") for index in range(2)
+        )
 
         for ax in axes_tuple:
             ax.set_xticks(self._base_angles)
@@ -633,12 +616,15 @@ class LoveLanguageApp:
             ax.set_ylim(0, 10)
             ax.tick_params(axis="x", pad=12)
 
+        scale_axis = figure.add_subplot(grid[1, :])
+        self._setup_scale_axis(scale_axis)
+
         figure.suptitle(
             "Love Language Alignment: Giving vs Receiving",
             fontsize=14,
             fontweight="bold",
         )
-        figure.subplots_adjust(left=0.08, right=0.78, top=0.84, bottom=0.12, wspace=0.45)
+        figure.subplots_adjust(left=0.08, right=0.82, top=0.86, bottom=0.16)
 
         self._figure = figure
         self._axes = axes_tuple
