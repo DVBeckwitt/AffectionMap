@@ -36,8 +36,9 @@ class LoveLanguageApp:
         self._insights_current = False
         self.scale_canvas: tk.Canvas | None = None
         self._default_names = {"person_a": "A", "person_b": "B"}
-        self._switch_buttons: Dict[str, ttk.Radiobutton] = {}
         self._switch_label_vars: Dict[str, tk.StringVar] = {}
+        self._switch_label_widgets: Dict[str, ttk.Label] = {}
+        self._switch_button_text = tk.StringVar()
         self._handle_lookup: Dict[Tuple[str, str], Tuple[str, str]] = {
             ("person_a", "giving"): ("a_to_b", "giving_handle"),
             ("person_a", "receiving"): ("b_to_a", "receiving_handle"),
@@ -105,7 +106,7 @@ class LoveLanguageApp:
         instructions = ttk.Label(
             section,
             text=(
-                "Select whose preferences to adjust using the toggle below, then drag the "
+                "Use the toggle above the charts to choose whose preferences to adjust, then drag the "
                 "circular handles on the radar charts to set how strongly each love "
                 "language resonates (0 to 10)."
             ),
@@ -113,37 +114,59 @@ class LoveLanguageApp:
         )
         instructions.grid(row=0, column=0, columnspan=2, sticky=tk.W)
 
-        self._create_active_profile_switch(section)
-
         self._create_person_frame(section, "person_a", "Person A", 2, 0)
         self._create_person_frame(section, "person_b", "Person B", 2, 1)
 
     def _create_active_profile_switch(self, parent: ttk.Frame) -> None:
-        switch_frame = ttk.Frame(parent, padding=(0, 12, 0, 8))
-        switch_frame.grid(row=1, column=0, columnspan=2, sticky=tk.W)
+        style = ttk.Style()
+        style.configure(
+            "PersonSwitch.TCheckbutton",
+            font=("Helvetica", 10, "bold"),
+            padding=(16, 6),
+            indicatoron=False,
+        )
+        style.map(
+            "PersonSwitch.TCheckbutton",
+            relief=[("selected", "sunken"), ("!selected", "raised")],
+        )
+
+        switch_frame = ttk.Frame(parent, padding=(0, 0, 0, 12))
+        switch_frame.pack(side=tk.TOP, anchor=tk.CENTER)
 
         ttk.Label(
             switch_frame,
             text="Adjusting preferences for:",
             font=("Helvetica", 10, "bold"),
-        ).grid(row=0, column=0, padx=(0, 12))
+        ).pack(anchor=tk.CENTER)
 
-        for idx, (key, label_text) in enumerate(
-            (("person_a", "Person A"), ("person_b", "Person B")), start=1
-        ):
-            label_var = tk.StringVar(value=label_text)
-            button = ttk.Radiobutton(
-                switch_frame,
-                variable=self._active_person_var,
-                value=key,
-                textvariable=label_var,
-                command=self._on_active_person_changed,
-            )
-            button.grid(row=0, column=idx, padx=6)
-            self._switch_buttons[key] = button
+        controls = ttk.Frame(switch_frame)
+        controls.pack(anchor=tk.CENTER, pady=(6, 0))
+
+        for column, (key, padx) in enumerate((("person_a", (0, 12)), ("person_b", (12, 0)))):
+            label_var = tk.StringVar(value=self._default_names[key])
+            label = ttk.Label(controls, textvariable=label_var, font=("Helvetica", 10))
+            label.grid(row=0, column=column * 2, padx=padx)
             self._switch_label_vars[key] = label_var
+            self._switch_label_widgets[key] = label
+            if column == 0:
+                toggle = ttk.Checkbutton(
+                    controls,
+                    textvariable=self._switch_button_text,
+                    variable=self._active_person_var,
+                    onvalue="person_b",
+                    offvalue="person_a",
+                    style="PersonSwitch.TCheckbutton",
+                    command=self._on_active_person_changed,
+                    takefocus=False,
+                )
+                toggle.grid(row=0, column=1)
+
+        self._update_switch_label("person_a")
+        self._update_switch_label("person_b")
+        self._update_switch_appearance()
 
     def _on_active_person_changed(self) -> None:
+        self._update_switch_appearance()
         self._update_handle_visibility()
         if self.canvas is not None:
             self.canvas.draw_idle()
@@ -151,14 +174,37 @@ class LoveLanguageApp:
     def _update_switch_label(self, key: str) -> None:
         label_var = self._switch_label_vars.get(key)
         profile = self._profiles.get(key)
-        if not label_var or not profile:
+        if not label_var:
             return
+        label_var.set(self._display_name_for(key))
+        self._update_switch_appearance()
+
+    def _display_name_for(self, key: str) -> str:
+        default_name = self._default_names.get(key, key)
+        profile = self._profiles.get(key)
+        if not profile:
+            return default_name
 
         title = cast(str, profile.get("title", ""))
-        name_var = cast(tk.StringVar, profile["name_var"])
-        display_name = name_var.get().strip() or self._default_names[key]
-        label_text = f"{title}: {display_name}" if title else display_name
-        label_var.set(label_text)
+        name_var = cast(tk.StringVar, profile.get("name_var"))
+        display_name = name_var.get().strip() if name_var else ""
+        display_name = display_name or default_name
+        return f"{title}: {display_name}" if title else display_name
+
+    def _update_switch_appearance(self) -> None:
+        active_key = self._active_person_var.get()
+        inactive_key = "person_b" if active_key == "person_a" else "person_a"
+
+        if self._switch_button_text is not None:
+            self._switch_button_text.set(
+                f"Switch to {self._display_name_for(inactive_key)}"
+            )
+
+        for key, label in self._switch_label_widgets.items():
+            if not label:
+                continue
+            font = ("Helvetica", 10, "bold") if key == active_key else ("Helvetica", 10)
+            label.configure(font=font)
 
     def _create_person_frame(
         self, parent: ttk.Frame, key: str, title: str, row: int, column: int
@@ -260,6 +306,8 @@ class LoveLanguageApp:
 
         self.plot_frame = ttk.Frame(section)
         self.plot_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self._create_active_profile_switch(self.plot_frame)
 
         explanation_frame = ttk.Frame(section, padding=(15, 0, 0, 0))
         explanation_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
