@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -37,7 +37,7 @@ class LoveLanguageApp:
         self.master.title("AffectionMap – Love Language Alignment")
         self.master.geometry("1100x720")
 
-        self._input_widgets: Dict[str, Dict[str, List[ttk.Spinbox]]] = {}
+        self._input_widgets: Dict[str, Dict[str, List[ttk.Scale]]] = {}
         self.canvas: FigureCanvasTkAgg | None = None
         self.text_var = tk.StringVar()
 
@@ -65,8 +65,8 @@ class LoveLanguageApp:
         instructions = ttk.Label(
             section,
             text=(
-                "Enter a score from 0 (never) to 10 (always) describing how each person "
-                "gives and prefers to receive every love language."
+                "Use the sliders to choose how strongly each love language resonates, from "
+                "Not at all to Most Important (0 to 10)."
             ),
             wraplength=720,
         )
@@ -91,43 +91,68 @@ class LoveLanguageApp:
         receiving_label = ttk.Label(frame, text="Receiving")
         receiving_label.grid(row=1, column=2, pady=(10, 0))
 
-        giving_spinboxes: List[ttk.Spinbox] = []
-        receiving_spinboxes: List[ttk.Spinbox] = []
+        frame.columnconfigure(1, weight=1)
+        frame.columnconfigure(2, weight=1)
+
+        giving_sliders: List[ttk.Scale] = []
+        receiving_sliders: List[ttk.Scale] = []
 
         for idx, category in enumerate(CATEGORIES, start=2):
             ttk.Label(frame, text=category).grid(
                 row=idx, column=0, padx=(0, 10), pady=2, sticky=tk.W
             )
 
-            giving_box = ttk.Spinbox(
-                frame,
-                from_=0,
-                to=10,
-                increment=1,
-                width=5,
-                justify=tk.CENTER,
-            )
-            giving_box.grid(row=idx, column=1, padx=5, pady=2)
-            giving_box.set("5")
-            giving_spinboxes.append(giving_box)
+            giving_container, giving_slider = self._create_slider_widget(frame)
+            giving_container.grid(row=idx, column=1, padx=5, pady=2, sticky=tk.EW)
+            giving_sliders.append(giving_slider)
 
-            receiving_box = ttk.Spinbox(
-                frame,
-                from_=0,
-                to=10,
-                increment=1,
-                width=5,
-                justify=tk.CENTER,
-            )
-            receiving_box.grid(row=idx, column=2, padx=5, pady=2)
-            receiving_box.set("5")
-            receiving_spinboxes.append(receiving_box)
+            receiving_container, receiving_slider = self._create_slider_widget(frame)
+            receiving_container.grid(row=idx, column=2, padx=5, pady=2, sticky=tk.EW)
+            receiving_sliders.append(receiving_slider)
 
         self._input_widgets[key] = {
             "name": name_entry,  # type: ignore[assignment]
-            "giving": giving_spinboxes,
-            "receiving": receiving_spinboxes,
+            "giving": giving_sliders,
+            "receiving": receiving_sliders,
         }
+
+    def _create_slider_widget(self, parent: ttk.Frame) -> Tuple[ttk.Frame, ttk.Scale]:
+        markers = [
+            "Not at all",
+            "A little",
+            "A lot",
+            "Very Important",
+            "Most Important",
+        ]
+
+        container = ttk.Frame(parent)
+        container.columnconfigure(0, weight=1)
+
+        display_var = tk.StringVar(value="5.00")
+
+        slider = ttk.Scale(container, from_=0.0, to=10.0, orient=tk.HORIZONTAL)
+        slider.set(5.0)
+        slider.grid(row=0, column=0, sticky=tk.EW)
+
+        value_label = ttk.Label(container, textvariable=display_var, width=6, anchor=tk.E)
+        value_label.grid(row=0, column=1, padx=(8, 0))
+
+        legend = ttk.Frame(container)
+        legend.grid(row=1, column=0, columnspan=2, sticky=tk.EW, pady=(4, 0))
+        for idx, label in enumerate(markers):
+            legend.columnconfigure(idx, weight=1)
+            ttk.Label(legend, text=label, font=("Helvetica", 8)).grid(
+                row=0, column=idx, sticky=tk.CENTER
+            )
+
+        def _update_display(value: str) -> None:
+            rounded = round(float(value), 2)
+            display_var.set(f"{rounded:.2f}")
+
+        slider.configure(command=_update_display)
+        _update_display("5.0")
+
+        return container, slider
 
     def _create_action_section(self, parent: ttk.Frame) -> None:
         section = ttk.Frame(parent)
@@ -159,14 +184,10 @@ class LoveLanguageApp:
         )
         self.explanation_label.pack(anchor=tk.W, pady=(10, 0))
 
-    def _validate_spinbox_values(self, spinboxes: List[ttk.Spinbox]) -> List[float]:
+    def _collect_slider_values(self, sliders: List[ttk.Scale]) -> List[float]:
         values: List[float] = []
-        for widget in spinboxes:
-            try:
-                value = float(widget.get())
-            except ValueError as exc:  # pragma: no cover - GUI path
-                raise ValueError("All scores must be numeric.") from exc
-
+        for widget in sliders:
+            value = round(float(widget.get()), 2)
             if not 0 <= value <= 10:
                 raise ValueError("Scores must be between 0 and 10.")
             values.append(value)
@@ -178,8 +199,8 @@ class LoveLanguageApp:
         if not name:
             name = "Person A" if key == "person_a" else "Person B"
 
-        giving = np.array(self._validate_spinbox_values(widgets["giving"]))
-        receiving = np.array(self._validate_spinbox_values(widgets["receiving"]))
+        giving = np.array(self._collect_slider_values(widgets["giving"]))
+        receiving = np.array(self._collect_slider_values(widgets["receiving"]))
         return PersonProfile(name=name, giving=giving, receiving=receiving)
 
     def _on_generate(self) -> None:
