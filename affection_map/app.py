@@ -28,6 +28,9 @@ class LoveLanguageApp:
 
         self._input_widgets: Dict[str, Dict[str, List[ttk.Scale]]] = {}
         self.canvas: FigureCanvasTkAgg | None = None
+        self._figure: Figure | None = None
+        self._axes: Tuple | None = None
+        self._plot_artists: Dict[str, Dict[str, object]] = {}
         self.text_var = tk.StringVar()
         self._live_update_job: Optional[str] = None
         self._insights_current = False
@@ -295,26 +298,92 @@ class LoveLanguageApp:
             and np.allclose(profile.receiving, 5.0)
         )
 
-    def _plot_profile(
+    def _ensure_plot_canvas(self, angles: np.ndarray) -> None:
+        if self.canvas is not None and self._axes is not None and self._figure is not None:
+            return
+
+        figure = Figure(figsize=(7.5, 5), dpi=100)
+        axes_array = figure.subplots(1, 2, subplot_kw={"projection": "polar"})
+        axes_tuple = tuple(np.ravel(axes_array))
+
+        for ax in axes_tuple:
+            ax.set_xticks(angles[:-1])
+            ax.set_xticklabels(CATEGORIES, fontsize=8)
+            ax.set_yticks(np.arange(0, 11, 2))
+            ax.set_ylim(0, 10)
+
+        figure.suptitle(
+            "Love Language Alignment: Giving vs Receiving",
+            fontsize=14,
+            fontweight="bold",
+        )
+        figure.tight_layout()
+
+        self._figure = figure
+        self._axes = axes_tuple
+
+        self.canvas = FigureCanvasTkAgg(figure, master=self.plot_frame)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    @staticmethod
+    def _update_polygon(polygon, angles: np.ndarray, values: np.ndarray) -> None:
+        polygon.set_xy(np.column_stack((angles, values)))
+
+    def _update_profile_plot(
         self,
+        key: str,
         ax,
-        angles: List[float],
+        angles: np.ndarray,
         giving_values: np.ndarray,
         receiving_values: np.ndarray,
         title: str,
         giving_label: str,
         receiving_label: str,
     ) -> None:
-        ax.plot(angles, giving_values, color="#55A868", linewidth=2, label=giving_label)
-        ax.fill(angles, giving_values, color="#55A868", alpha=0.25)
-        ax.plot(angles, receiving_values, color="#4C72B0", linewidth=2, label=receiving_label)
-        ax.fill(angles, receiving_values, color="#4C72B0", alpha=0.25)
+        artists = self._plot_artists.get(key)
+        if not artists:
+            giving_line, = ax.plot(
+                angles,
+                giving_values,
+                color="#55A868",
+                linewidth=2,
+                label=giving_label,
+            )
+            giving_fill = ax.fill(angles, giving_values, color="#55A868", alpha=0.25)[0]
+            receiving_line, = ax.plot(
+                angles,
+                receiving_values,
+                color="#4C72B0",
+                linewidth=2,
+                label=receiving_label,
+            )
+            receiving_fill = ax.fill(angles, receiving_values, color="#4C72B0", alpha=0.25)[0]
+            legend = ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.1))
+            artists = {
+                "giving_line": giving_line,
+                "giving_fill": giving_fill,
+                "receiving_line": receiving_line,
+                "receiving_fill": receiving_fill,
+                "legend": legend,
+            }
+            self._plot_artists[key] = artists
+        else:
+            giving_line = artists["giving_line"]
+            giving_line.set_data(angles, giving_values)
+            giving_line.set_label(giving_label)
+            self._update_polygon(artists["giving_fill"], angles, giving_values)
+
+            receiving_line = artists["receiving_line"]
+            receiving_line.set_data(angles, receiving_values)
+            receiving_line.set_label(receiving_label)
+            self._update_polygon(artists["receiving_fill"], angles, receiving_values)
+
+            legend = artists["legend"]
+            legend.remove()
+            artists["legend"] = ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.1))
+
         ax.set_title(title, pad=15, fontsize=11)
-        ax.set_xticks(angles[:-1])
-        ax.set_xticklabels(CATEGORIES, fontsize=8)
-        ax.set_yticks(np.arange(0, 11, 2))
-        ax.set_ylim(0, 10)
-        ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.1))
 
     def _render_plot(
         self,
@@ -328,13 +397,12 @@ class LoveLanguageApp:
         person_b_loop_giving = close_loop(person_b.giving)
         person_b_loop_receiving = close_loop(person_b.receiving)
 
-        if self.canvas:
-            self.canvas.get_tk_widget().destroy()
+        angles = np.asarray(polar_angles(), dtype=float)
 
-        figure = Figure(figsize=(7.5, 5), dpi=100)
-        axes = figure.subplots(1, 2, subplot_kw={"projection": "polar"})
+        self._ensure_plot_canvas(angles)
 
-        angles = polar_angles()
+        if not self._axes:
+            return
 
         title_left = f"{person_a.name} → {person_b.name}"
         title_right = f"{person_b.name} → {person_a.name}"
@@ -343,8 +411,9 @@ class LoveLanguageApp:
             title_left += f" (r = {corr_a_to_b:.2f})"
             title_right += f" (r = {corr_b_to_a:.2f})"
 
-        self._plot_profile(
-            axes[0],
+        self._update_profile_plot(
+            "a_to_b",
+            self._axes[0],
             angles,
             person_a_loop_giving,
             person_b_loop_receiving,
@@ -353,8 +422,9 @@ class LoveLanguageApp:
             f"{person_b.name} Receiving",
         )
 
-        self._plot_profile(
-            axes[1],
+        self._update_profile_plot(
+            "b_to_a",
+            self._axes[1],
             angles,
             person_b_loop_giving,
             person_a_loop_receiving,
@@ -363,12 +433,8 @@ class LoveLanguageApp:
             f"{person_a.name} Receiving",
         )
 
-        figure.suptitle("Love Language Alignment: Giving vs Receiving", fontsize=14, fontweight="bold")
-        figure.tight_layout()
-
-        self.canvas = FigureCanvasTkAgg(figure, master=self.plot_frame)
-        self.canvas.draw()
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        if self.canvas is not None:
+            self.canvas.draw_idle()
 
 
 def main() -> None:
