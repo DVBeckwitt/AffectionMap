@@ -1,25 +1,33 @@
-import unittest
+import sys
+from pathlib import Path
 
 import numpy as np
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from affection_map.analysis import correlation
 
 
-class CorrelationTests(unittest.TestCase):
-    def test_identical_profiles_return_one(self) -> None:
-        values = np.array([5.0, 5.0, 5.0, 5.0, 5.0])
-        self.assertEqual(correlation(values, values), 1.0)
-
-    def test_constant_against_variable_returns_zero(self) -> None:
-        constant = np.array([5.0, 5.0, 5.0, 5.0, 5.0])
-        variable = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-        self.assertEqual(correlation(constant, variable), 0.0)
-
-    def test_distinct_but_matching_trends(self) -> None:
-        a = np.array([2.0, 4.0, 6.0, 8.0, 10.0])
-        b = np.array([3.0, 6.0, 9.0, 12.0, 15.0])
-        self.assertAlmostEqual(correlation(a, b), 1.0)
+def test_correlation_matches_perfect_positive() -> None:
+    x = np.array([0, 2, 4, 6, 8], float)
+    y = x + 3.7
+    assert np.isclose(correlation(x, y), 1.0)
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_correlation_matches_perfect_negative() -> None:
+    x = np.array([0, 2, 4, 6, 8], float)
+    y = -2 * x
+    assert np.isclose(correlation(x, y), -1.0)
+
+
+def test_correlation_handles_constant_vectors() -> None:
+    x = np.array([0, 2, 4, 6, 8], float)
+    c = np.full(5, 5.0)
+    assert not np.isfinite(correlation(c, x))
+    assert not np.isfinite(correlation(c, c))
+
+
+def test_correlation_invariant_to_translation_and_scale() -> None:
+    x = np.array([0, 2, 4, 6, 8], float)
+    z = 10 - x
+    assert np.isclose(correlation(x, z), -1.0)

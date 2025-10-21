@@ -499,7 +499,7 @@ class LoveLanguageApp:
 
         for key, value in markers.items():
             marker_info = self._scale_markers[key]
-            marker_info["value"] = value
+            marker_info["value"] = value if (value is not None and np.isfinite(value)) else None
             marker_info["label_text"] = labels[key]
             self._draw_scale_marker(key)
 
