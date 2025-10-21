@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import List
 
 import numpy as np
-from scipy.stats import pearsonr
+from .statistics import pearson_correlation
 
 CATEGORIES: List[str] = [
     "Words of Affirmation",
@@ -26,18 +26,27 @@ class PersonProfile:
 
 
 def correlation(first: np.ndarray, second: np.ndarray) -> float:
-    """Return the Pearson correlation between two value arrays."""
-    first_arr = np.asarray(first, dtype=float)
-    second_arr = np.asarray(second, dtype=float)
+    """Return Pearson's r for two 1-D sequences.
 
-    if np.allclose(first_arr, second_arr):
-        return 1.0
+    When either sequence lacks variance or the sample size is < 2 the Pearson
+    correlation is mathematically undefined, so the function returns ``nan`` to
+    signal that condition.
+    """
 
-    if np.all(first_arr == first_arr[0]) or np.all(second_arr == second_arr[0]):
-        return 0.0
+    x = np.asarray(first, dtype=float).ravel()
+    y = np.asarray(second, dtype=float).ravel()
 
-    corr, _ = pearsonr(first_arr, second_arr)
-    return float(corr)
+    if x.shape != y.shape:
+        raise ValueError("correlation requires arrays of equal length")
+
+    n = x.size
+    if n < 2:
+        return float("nan")
+
+    if np.isclose(np.var(x, ddof=1), 0.0) or np.isclose(np.var(y, ddof=1), 0.0):
+        return float("nan")
+
+    return pearson_correlation(x, y)
 
 
 def close_loop(values: np.ndarray) -> np.ndarray:
@@ -80,39 +89,40 @@ def build_explanation(
     largest_gap = np.argmax(np.abs(person_a.giving - person_b.receiving))
 
     summary.append(
-        (
-            f"\nGreatest shared enthusiasm: {CATEGORIES[strongest_alignment]} — both of you score "
-            "high here, so this language may feel especially natural together."
-        )
+        f"\nGreatest shared enthusiasm: {CATEGORIES[strongest_alignment]} - both of you score high here."
     )
     summary.append(
-        (
-            f"Most aligned expectations: {CATEGORIES[closest_alignment]} — your giving and receiving "
-            "scores are the closest match in this area."
-        )
+        f"Most aligned expectations: {CATEGORIES[closest_alignment]} - your giving and receiving are closest here."
     )
     summary.append(
-        (
-            f"Greatest mismatch: {CATEGORIES[largest_gap]} — focus on sharing preferences here to bridge "
-            "the gap between how one of you gives and the other prefers to receive."
-        )
+        f"Largest gap: {CATEGORIES[largest_gap]} - discuss preferences here to bridge differences."
     )
 
     return "\n\n".join(summary)
 
 
 def interpret_correlation(giver: str, receiver: str, value: float, description: str) -> str:
-    """Return text summarising the strength of a correlation value."""
-    strength = "low"
-    if value >= 0.75:
-        strength = "very strong"
-    elif value >= 0.5:
-        strength = "strong"
-    elif value >= 0.25:
-        strength = "moderate"
-    elif value <= -0.25:
-        strength = "challenging"
+    """Summarise the strength and direction of a correlation value."""
 
+    if not np.isfinite(value):
+        return (
+            f"{giver} → {receiver}: r is undefined. "
+            f"Insufficient variation to assess {description}."
+        )
+
+    abs_r = abs(value)
+    if abs_r >= 0.9:
+        strength = "near perfect"
+    elif abs_r >= 0.7:
+        strength = "strong"
+    elif abs_r >= 0.4:
+        strength = "moderate"
+    elif abs_r >= 0.2:
+        strength = "weak"
+    else:
+        strength = "minimal or mixed"
+
+    direction = "alignment" if value >= 0 else "inverse alignment"
     return (
-        f"{giver} → {receiver}: r = {value:.2f}. This indicates {strength} alignment in {description}."
+        f"{giver} → {receiver}: r = {value:.2f}. {strength} {direction} in {description}."
     )
