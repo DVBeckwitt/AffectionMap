@@ -566,7 +566,7 @@ class LoveLanguageApp:
             fontsize=14,
             fontweight="bold",
         )
-        figure.tight_layout()
+        figure.subplots_adjust(left=0.08, right=0.78, top=0.84, bottom=0.12, wspace=0.45)
 
         self._figure = figure
         self._axes = axes_tuple
@@ -608,7 +608,12 @@ class LoveLanguageApp:
                 label=receiving_label,
             )
             receiving_fill = ax.fill(angles, receiving_values, color="#4C72B0", alpha=0.25)[0]
-            legend = ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.1))
+            legend = ax.legend(
+                loc="upper left",
+                bbox_to_anchor=(1.02, 1.02),
+                borderaxespad=0.0,
+                frameon=True,
+            )
             artists = {
                 "giving_line": giving_line,
                 "giving_fill": giving_fill,
@@ -630,7 +635,12 @@ class LoveLanguageApp:
 
             legend = artists["legend"]
             legend.remove()
-            artists["legend"] = ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.1))
+            artists["legend"] = ax.legend(
+                loc="upper left",
+                bbox_to_anchor=(1.02, 1.02),
+                borderaxespad=0.0,
+                frameon=True,
+            )
 
         ax.set_title(title, pad=15, fontsize=11)
 
