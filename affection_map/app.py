@@ -237,7 +237,10 @@ class LoveLanguageApp:
     def _schedule_live_update(self) -> None:
         if self._live_update_job is not None:
             self.master.after_cancel(self._live_update_job)
-        self._live_update_job = self.master.after(75, self._refresh_live_preview)
+        # Update quickly so the radar charts closely track slider movement.
+        # A 10 ms delay keeps the UI responsive while providing very smooth
+        # visual feedback when users drag the scales in small increments.
+        self._live_update_job = self.master.after(10, self._refresh_live_preview)
 
     def _refresh_live_preview(self) -> None:
         self._live_update_job = None
