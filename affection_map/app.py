@@ -90,7 +90,7 @@ class LoveLanguageApp:
             section,
             text=(
                 "Use the sliders to choose how strongly each love language resonates, from "
-                "Not at all to Most Important (0 to 10)."
+                "Not at all to Essential (0 to 10)."
             ),
             wraplength=720,
         )
@@ -149,11 +149,8 @@ class LoveLanguageApp:
         self, parent: ttk.Frame, *, show_markers: bool = True
     ) -> Tuple[ttk.Frame, ttk.Scale]:
         markers = [
-            "Not at all",
-            "A little",
-            "A lot",
-            "Very Important",
-            "Most Important",
+            ("Not at all", tk.W),
+            ("Essential", tk.E),
         ]
 
         container = ttk.Frame(parent)
@@ -171,10 +168,10 @@ class LoveLanguageApp:
         if show_markers:
             legend = ttk.Frame(container)
             legend.grid(row=1, column=0, columnspan=2, sticky=tk.EW, pady=(4, 0))
-            for idx, label in enumerate(markers):
+            for idx, (label, anchor) in enumerate(markers):
                 legend.columnconfigure(idx, weight=1)
                 ttk.Label(legend, text=label, font=("Helvetica", 8)).grid(
-                    row=0, column=idx
+                    row=0, column=idx, sticky=anchor
                 )
 
         def _update_display(value: str) -> None:
@@ -201,13 +198,22 @@ class LoveLanguageApp:
             padding=(20, 10),
         )
 
+        content = ttk.Frame(section)
+        content.pack(fill=tk.X)
+        content.columnconfigure(0, weight=0)
+        content.columnconfigure(1, weight=1)
+        content.rowconfigure(0, weight=1)
+
         button = ttk.Button(
-            section,
+            content,
             text="Generate Compatibility Report",
             style="Generate.TButton",
             command=self._on_generate,
         )
-        button.pack(pady=10)
+        button.grid(row=0, column=0, sticky=tk.W, pady=10)
+
+        scale_container = self._create_correlation_scale(content)
+        scale_container.grid(row=0, column=1, sticky=tk.NSEW, padx=(20, 0), pady=10)
 
     def _create_results_section(self, parent: ttk.Frame) -> None:
         section = ttk.Frame(parent)
@@ -232,11 +238,8 @@ class LoveLanguageApp:
         )
         self.explanation_label.pack(anchor=tk.W, pady=(10, 0))
 
-        self._create_correlation_scale(explanation_frame)
-
-    def _create_correlation_scale(self, parent: ttk.Frame) -> None:
-        scale_container = ttk.Frame(parent)
-        scale_container.pack(anchor=tk.W, fill=tk.X, pady=(15, 0))
+    def _create_correlation_scale(self, parent: ttk.Frame) -> ttk.Frame:
+        scale_container = ttk.Frame(parent, padding=(0, 0, 0, 0))
 
         title = ttk.Label(
             scale_container,
@@ -253,6 +256,8 @@ class LoveLanguageApp:
         self.scale_canvas.pack(fill=tk.X, expand=False, pady=(8, 0))
         self.scale_canvas.bind("<Configure>", self._redraw_scale)
         self._redraw_scale()
+
+        return scale_container
 
     def _redraw_scale(self, event: tk.Event | None = None) -> None:
         if self.scale_canvas is None:
@@ -389,20 +394,14 @@ class LoveLanguageApp:
             return
 
         markers = {
-            "a_to_b": (
-                corr_a_to_b,
-                f"{person_a.name} → {person_b.name}: r = {corr_a_to_b:.2f}",
-            ),
-            "b_to_a": (
-                corr_b_to_a,
-                f"{person_b.name} → {person_a.name}: r = {corr_b_to_a:.2f}",
-            ),
+            "a_to_b": corr_a_to_b,
+            "b_to_a": corr_b_to_a,
         }
 
-        for key, (value, label_text) in markers.items():
+        for key, value in markers.items():
             marker_info = self._scale_markers[key]
             marker_info["value"] = value
-            marker_info["label_text"] = label_text
+            marker_info["label_text"] = ""
             self._draw_scale_marker(key)
 
     def _collect_slider_values(self, sliders: List[ttk.Scale]) -> List[float]:
