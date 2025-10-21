@@ -36,8 +36,8 @@ class LoveLanguageApp:
         self._insights_current = False
         self.scale_canvas: tk.Canvas | None = None
         self._default_names = {"person_a": "A", "person_b": "B"}
-        self._switch_label_vars: Dict[str, tk.StringVar] = {}
-        self._switch_label_widgets: Dict[str, ttk.Label] = {}
+        self._switch_person_labels: Dict[str, ttk.Label] = {}
+        self._switch_name_entries: Dict[str, ttk.Entry] = {}
         self._switch_button_text = tk.StringVar()
         self._handle_lookup: Dict[Tuple[str, str], Tuple[str, str]] = {
             ("person_a", "giving"): ("a_to_b", "giving_handle"),
@@ -142,27 +142,72 @@ class LoveLanguageApp:
         controls = ttk.Frame(switch_frame)
         controls.pack(anchor=tk.CENTER, pady=(6, 0))
 
-        for column, (key, padx) in enumerate((("person_a", (0, 12)), ("person_b", (12, 0)))):
-            label_var = tk.StringVar(value=self._default_names[key])
-            label = ttk.Label(controls, textvariable=label_var, font=("Helvetica", 10))
-            label.grid(row=0, column=column * 2, padx=padx)
-            self._switch_label_vars[key] = label_var
-            self._switch_label_widgets[key] = label
-            if column == 0:
-                toggle = ttk.Checkbutton(
-                    controls,
-                    textvariable=self._switch_button_text,
-                    variable=self._active_person_var,
-                    onvalue="person_b",
-                    offvalue="person_a",
-                    style="PersonSwitch.TCheckbutton",
-                    command=self._on_active_person_changed,
-                    takefocus=False,
-                )
-                toggle.grid(row=0, column=1)
+        profile_a = self._profiles.get("person_a", {})
+        profile_b = self._profiles.get("person_b", {})
 
-        self._update_switch_label("person_a")
-        self._update_switch_label("person_b")
+        default_a = self._default_names.get("person_a", "")
+        default_b = self._default_names.get("person_b", "")
+
+        if "name_var" not in profile_a:
+            profile_a["name_var"] = tk.StringVar(value=default_a)
+        if "name_var" not in profile_b:
+            profile_b["name_var"] = tk.StringVar(value=default_b)
+
+        name_var_a = cast(tk.StringVar, profile_a["name_var"])
+        name_var_b = cast(tk.StringVar, profile_b["name_var"])
+
+        label_a = ttk.Label(controls, text=f"{profile_a.get('title', 'Person A')}:", font=("Helvetica", 10))
+        label_a.grid(row=0, column=0, padx=(0, 6))
+        entry_a = ttk.Entry(controls, width=18, textvariable=name_var_a, justify=tk.CENTER)
+        entry_a.grid(row=0, column=1, padx=(0, 12))
+
+        toggle = ttk.Checkbutton(
+            controls,
+            textvariable=self._switch_button_text,
+            variable=self._active_person_var,
+            onvalue="person_b",
+            offvalue="person_a",
+            style="PersonSwitch.TCheckbutton",
+            command=self._on_active_person_changed,
+            takefocus=False,
+        )
+        toggle.grid(row=0, column=2, padx=(0, 12))
+
+        label_b = ttk.Label(controls, text=f"{profile_b.get('title', 'Person B')}:", font=("Helvetica", 10))
+        label_b.grid(row=0, column=3, padx=(12, 6))
+        entry_b = ttk.Entry(controls, width=18, textvariable=name_var_b, justify=tk.CENTER)
+        entry_b.grid(row=0, column=4)
+
+        self._switch_person_labels["person_a"] = label_a
+        self._switch_person_labels["person_b"] = label_b
+        self._switch_name_entries["person_a"] = entry_a
+        self._switch_name_entries["person_b"] = entry_b
+
+        profile_a["name_entry"] = entry_a
+        profile_b["name_entry"] = entry_b
+
+        def _make_focus_handlers(var: tk.StringVar, default_value: str):
+            def _handle_focus_in(event: tk.Event) -> None:
+                if var.get().strip() == default_value:
+                    event.widget.selection_range(0, tk.END)
+
+            def _handle_focus_out(event: tk.Event) -> None:
+                if not var.get().strip():
+                    var.set(default_value)
+                self._schedule_live_update()
+
+            return _handle_focus_in, _handle_focus_out
+
+        focus_in_a, focus_out_a = _make_focus_handlers(name_var_a, default_a)
+        focus_in_b, focus_out_b = _make_focus_handlers(name_var_b, default_b)
+
+        entry_a.bind("<FocusIn>", focus_in_a)
+        entry_a.bind("<FocusOut>", focus_out_a)
+        entry_b.bind("<FocusIn>", focus_in_b)
+        entry_b.bind("<FocusOut>", focus_out_b)
+
+        self._profiles["person_a"] = profile_a
+        self._profiles["person_b"] = profile_b
         self._update_switch_appearance()
 
     def _on_active_person_changed(self) -> None:
@@ -170,14 +215,6 @@ class LoveLanguageApp:
         self._update_handle_visibility()
         if self.canvas is not None:
             self.canvas.draw_idle()
-
-    def _update_switch_label(self, key: str) -> None:
-        label_var = self._switch_label_vars.get(key)
-        profile = self._profiles.get(key)
-        if not label_var:
-            return
-        label_var.set(self._display_name_for(key))
-        self._update_switch_appearance()
 
     def _display_name_for(self, key: str) -> str:
         default_name = self._default_names.get(key, key)
@@ -200,11 +237,17 @@ class LoveLanguageApp:
                 f"Switch to {self._display_name_for(inactive_key)}"
             )
 
-        for key, label in self._switch_label_widgets.items():
+        for key, label in self._switch_person_labels.items():
             if not label:
                 continue
             font = ("Helvetica", 10, "bold") if key == active_key else ("Helvetica", 10)
             label.configure(font=font)
+
+        for key, entry in self._switch_name_entries.items():
+            if not entry:
+                continue
+            font = ("Helvetica", 10, "bold") if key == active_key else ("Helvetica", 10)
+            entry.configure(font=font)
 
     def _create_person_frame(
         self, parent: ttk.Frame, key: str, title: str, row: int, column: int
@@ -212,32 +255,13 @@ class LoveLanguageApp:
         frame = ttk.Labelframe(parent, text=title, padding=15)
         frame.grid(row=row, column=column, padx=10, sticky=tk.N)
 
-        name_label = ttk.Label(frame, text="Name:")
-        name_label.grid(row=0, column=0, sticky=tk.W)
         default_name = self._default_names[key]
         name_var = tk.StringVar(value=default_name)
-        name_entry = ttk.Entry(frame, width=22, textvariable=name_var)
-        name_entry.grid(row=0, column=1, sticky=tk.W)
-
-        def _handle_focus_in(event: tk.Event) -> None:
-            if name_entry.get().strip() == default_name:
-                name_entry.delete(0, tk.END)
-
-        def _handle_focus_out(event: tk.Event) -> None:
-            if not name_entry.get().strip():
-                name_entry.insert(0, default_name)
-            self._schedule_live_update()
-
-        name_entry.bind("<FocusIn>", _handle_focus_in)
-        name_entry.bind("<FocusOut>", _handle_focus_out)
 
         def _on_name_change(*_: object) -> None:
-            self._update_switch_label(key)
+            self._update_switch_appearance()
             self._schedule_live_update()
-
         name_var.trace_add("write", _on_name_change)
-
-        frame.columnconfigure(1, weight=1)
 
         ttk.Label(
             frame,
@@ -248,7 +272,6 @@ class LoveLanguageApp:
 
         profile_info: Dict[str, object] = {
             "frame": frame,
-            "name_entry": name_entry,
             "name_var": name_var,
             "giving": np.full(len(CATEGORIES), 5.0, dtype=float),
             "receiving": np.full(len(CATEGORIES), 5.0, dtype=float),
@@ -256,7 +279,6 @@ class LoveLanguageApp:
         }
 
         self._profiles[key] = profile_info
-        self._update_switch_label(key)
 
     def _create_action_section(self, parent: ttk.Frame) -> None:
         section = ttk.Frame(parent)
