@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 
 from .analysis import (
     CATEGORIES,
@@ -26,7 +26,7 @@ class LoveLanguageApp:
         self.master = master
         self.master.title("AffectionMap – Love Language Alignment")
 
-        self._input_widgets: Dict[str, Dict[str, List[ttk.Scale]]] = {}
+        self._input_widgets: Dict[str, Dict[str, object]] = {}
         self.canvas: FigureCanvasTkAgg | None = None
         self._figure: Figure | None = None
         self._axes: Tuple | None = None
@@ -35,19 +35,20 @@ class LoveLanguageApp:
         self._live_update_job: Optional[str] = None
         self._insights_current = False
         self.scale_canvas: tk.Canvas | None = None
+        self._default_names = {"person_a": "A", "person_b": "B"}
         self._scale_markers: Dict[str, Dict[str, object | None]] = {
             "a_to_b": {
                 "value": None,
                 "marker": None,
                 "label": None,
-                "label_text": "",
+                "label_text": "A → B",
                 "color": "#C44E52",
             },
             "b_to_a": {
                 "value": None,
                 "marker": None,
                 "label": None,
-                "label_text": "",
+                "label_text": "B → A",
                 "color": "#4C72B0",
             },
         }
@@ -107,8 +108,27 @@ class LoveLanguageApp:
 
         name_label = ttk.Label(frame, text="Name:")
         name_label.grid(row=0, column=0, sticky=tk.W)
-        name_entry = ttk.Entry(frame, width=22)
+        default_name = self._default_names[key]
+        name_var = tk.StringVar(value=default_name)
+        name_entry = ttk.Entry(frame, width=22, textvariable=name_var)
         name_entry.grid(row=0, column=1, sticky=tk.W)
+
+        def _handle_focus_in(event: tk.Event) -> None:
+            if name_entry.get().strip() == default_name:
+                name_entry.delete(0, tk.END)
+
+        def _handle_focus_out(event: tk.Event) -> None:
+            if not name_entry.get().strip():
+                name_entry.insert(0, default_name)
+            self._schedule_live_update()
+
+        name_entry.bind("<FocusIn>", _handle_focus_in)
+        name_entry.bind("<FocusOut>", _handle_focus_out)
+
+        def _on_name_change(*_: object) -> None:
+            self._schedule_live_update()
+
+        name_var.trace_add("write", _on_name_change)
 
         giving_label = ttk.Label(frame, text="Giving")
         giving_label.grid(row=1, column=1, pady=(10, 0))
@@ -140,7 +160,8 @@ class LoveLanguageApp:
             receiving_sliders.append(receiving_slider)
 
         self._input_widgets[key] = {
-            "name": name_entry,  # type: ignore[assignment]
+            "name": name_entry,
+            "name_var": name_var,
             "giving": giving_sliders,
             "receiving": receiving_sliders,
         }
@@ -211,6 +232,20 @@ class LoveLanguageApp:
             command=self._on_generate,
         )
         button.grid(row=0, column=0, sticky=tk.W, pady=10)
+
+        style.configure(
+            "Save.TButton",
+            font=("Helvetica", 10),
+            padding=(14, 6),
+        )
+
+        save_button = ttk.Button(
+            content,
+            text="Save Love Language Figure…",
+            style="Save.TButton",
+            command=self._on_save_figure,
+        )
+        save_button.grid(row=1, column=0, sticky=tk.W)
 
         scale_container = self._create_correlation_scale(content)
         scale_container.grid(row=0, column=1, sticky=tk.NSEW, padx=(20, 0), pady=10)
@@ -393,6 +428,20 @@ class LoveLanguageApp:
         if self.scale_canvas is None:
             return
 
+        labels = {
+            "a_to_b": self._format_scale_label(
+                person_a.name,
+                person_b.name,
+                self._default_names["person_a"],
+                self._default_names["person_b"],
+            ),
+            "b_to_a": self._format_scale_label(
+                person_b.name,
+                person_a.name,
+                self._default_names["person_b"],
+                self._default_names["person_a"],
+            ),
+        }
         markers = {
             "a_to_b": corr_a_to_b,
             "b_to_a": corr_b_to_a,
@@ -401,7 +450,7 @@ class LoveLanguageApp:
         for key, value in markers.items():
             marker_info = self._scale_markers[key]
             marker_info["value"] = value
-            marker_info["label_text"] = ""
+            marker_info["label_text"] = labels[key]
             self._draw_scale_marker(key)
 
     def _collect_slider_values(self, sliders: List[ttk.Scale]) -> List[float]:
@@ -424,7 +473,7 @@ class LoveLanguageApp:
                 raise ValueError(
                     f"Please enter a name for {default_label} before generating a report."
                 )
-            name = "Person A" if key == "person_a" else "Person B"
+            name = self._default_names[key]
 
         giving = np.array(self._collect_slider_values(widgets["giving"]))
         receiving = np.array(self._collect_slider_values(widgets["receiving"]))
@@ -602,6 +651,20 @@ class LoveLanguageApp:
         if not self._axes:
             return
 
+        self._scale_markers["a_to_b"]["label_text"] = self._format_scale_label(
+            person_a.name,
+            person_b.name,
+            self._default_names["person_a"],
+            self._default_names["person_b"],
+        )
+        self._scale_markers["b_to_a"]["label_text"] = self._format_scale_label(
+            person_b.name,
+            person_a.name,
+            self._default_names["person_b"],
+            self._default_names["person_a"],
+        )
+        self._reposition_scale_markers()
+
         title_left = f"{person_a.name} → {person_b.name}"
         title_right = f"{person_b.name} → {person_a.name}"
         self._update_profile_plot(
@@ -628,6 +691,39 @@ class LoveLanguageApp:
 
         if self.canvas is not None:
             self.canvas.draw_idle()
+
+    def _format_scale_label(
+        self, source: str, target: str, default_source: str, default_target: str
+    ) -> str:
+        source_clean = source.strip() or default_source
+        target_clean = target.strip() or default_target
+        return f"{source_clean} → {target_clean}"
+
+    def _on_save_figure(self) -> None:
+        if self._figure is None:
+            messagebox.showinfo(
+                "Nothing to save",
+                "Create a compatibility preview before saving the figure.",
+            )
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            title="Save love language figure",
+            defaultextension=".png",
+            filetypes=[
+                ("PNG Image", "*.png"),
+                ("SVG Image", "*.svg"),
+                ("All Files", "*.*"),
+            ],
+        )
+
+        if not file_path:
+            return
+
+        try:
+            self._figure.savefig(file_path)
+        except Exception as error:  # pragma: no cover - GUI path
+            messagebox.showerror("Save failed", str(error))
 
 
 def main() -> None:
