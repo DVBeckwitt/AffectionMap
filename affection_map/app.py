@@ -1,11 +1,12 @@
 """Graphical interface for exploring love language alignment."""
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, cast
 
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -205,6 +206,21 @@ class LoveLanguageApp:
         )
         self.explanation_label.pack(anchor=tk.W, pady=(10, 0))
 
+        scale_description = (
+            "Correlation scale (r):\n"
+            "-1 – Opposite priorities; when one values a language more, the other values it less.\n"
+            "0 – No consistent relationship between the two sets of priorities.\n"
+            "+1 – Perfect alignment; both people value each language similarly."
+        )
+        self.correlation_scale_label = ttk.Label(
+            explanation_frame,
+            text=scale_description,
+            wraplength=320,
+            justify=tk.LEFT,
+            font=("Helvetica", 9),
+        )
+        self.correlation_scale_label.pack(anchor=tk.W, pady=(15, 0))
+
     def _collect_slider_values(self, sliders: List[ttk.Scale]) -> List[float]:
         values: List[float] = []
         for widget in sliders:
@@ -330,6 +346,91 @@ class LoveLanguageApp:
     def _update_polygon(polygon, angles: np.ndarray, values: np.ndarray) -> None:
         polygon.set_xy(np.column_stack((angles, values)))
 
+    def _clear_scale_artists(self, artists: Dict[str, object]) -> None:
+        scale_artists = artists.get("scale_artists")
+        if scale_artists:
+            for element in cast(List[object], scale_artists):
+                element.remove()
+        artists["scale_artists"] = []
+
+    def _update_correlation_scale(
+        self,
+        ax,
+        artists: Dict[str, object],
+        correlation_value: float | None,
+    ) -> None:
+        if correlation_value is None:
+            if artists:
+                self._clear_scale_artists(artists)
+            return
+
+        start_x, end_x = 0.2, 0.8
+        y = -0.12
+
+        self._clear_scale_artists(artists)
+        scale_artists = []
+
+        base_line = Line2D(
+            [start_x, end_x],
+            [y, y],
+            transform=ax.transAxes,
+            color="#444444",
+            linewidth=1,
+        )
+        ax.add_line(base_line)
+        scale_artists.append(base_line)
+
+        for tick_value in (-1, 0, 1):
+            position = start_x + ((tick_value + 1) / 2) * (end_x - start_x)
+            tick = Line2D(
+                [position, position],
+                [y - 0.025, y + 0.025],
+                transform=ax.transAxes,
+                color="#444444",
+                linewidth=1,
+            )
+            ax.add_line(tick)
+            scale_artists.append(tick)
+
+            label = ax.text(
+                position,
+                y - 0.055,
+                f"{tick_value:+.0f}" if tick_value else "0",
+                transform=ax.transAxes,
+                ha="center",
+                va="top",
+                fontsize=9,
+            )
+            scale_artists.append(label)
+
+        marker_position = start_x + ((np.clip(correlation_value, -1.0, 1.0) + 1) / 2) * (
+            end_x - start_x
+        )
+        marker = Line2D(
+            [marker_position],
+            [y],
+            marker="o",
+            markersize=6,
+            color="#C44E52",
+            transform=ax.transAxes,
+        )
+        ax.add_line(marker)
+        scale_artists.append(marker)
+
+        marker_label = ax.text(
+            0.5,
+            y - 0.12,
+            f"r = {correlation_value:.2f}",
+            transform=ax.transAxes,
+            ha="center",
+            va="top",
+            fontsize=9,
+            color="#C44E52",
+        )
+        scale_artists.append(marker_label)
+
+        artists["scale_artists"] = scale_artists
+
     def _update_profile_plot(
         self,
         key: str,
@@ -340,6 +441,7 @@ class LoveLanguageApp:
         title: str,
         giving_label: str,
         receiving_label: str,
+        correlation_value: float | None,
     ) -> None:
         artists = self._plot_artists.get(key)
         if not artists:
@@ -366,6 +468,7 @@ class LoveLanguageApp:
                 "receiving_line": receiving_line,
                 "receiving_fill": receiving_fill,
                 "legend": legend,
+                "scale_artists": [],
             }
             self._plot_artists[key] = artists
         else:
@@ -384,6 +487,7 @@ class LoveLanguageApp:
             artists["legend"] = ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.1))
 
         ax.set_title(title, pad=15, fontsize=11)
+        self._update_correlation_scale(ax, artists, correlation_value)
 
     def _render_plot(
         self,
@@ -406,11 +510,6 @@ class LoveLanguageApp:
 
         title_left = f"{person_a.name} → {person_b.name}"
         title_right = f"{person_b.name} → {person_a.name}"
-        if correlations is not None:
-            corr_a_to_b, corr_b_to_a = correlations
-            title_left += f" (r = {corr_a_to_b:.2f})"
-            title_right += f" (r = {corr_b_to_a:.2f})"
-
         self._update_profile_plot(
             "a_to_b",
             self._axes[0],
@@ -420,6 +519,7 @@ class LoveLanguageApp:
             title_left,
             f"{person_a.name} Giving",
             f"{person_b.name} Receiving",
+            correlations[0] if correlations is not None else None,
         )
 
         self._update_profile_plot(
@@ -431,6 +531,7 @@ class LoveLanguageApp:
             title_right,
             f"{person_b.name} Giving",
             f"{person_a.name} Receiving",
+            correlations[1] if correlations is not None else None,
         )
 
         if self.canvas is not None:
