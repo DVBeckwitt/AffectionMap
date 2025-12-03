@@ -1,4 +1,5 @@
 # AffectionMap
+![Main interface placeholder](docs/images/main-interface.png)
 
 AffectionMap is a desktop application that helps couples, friends, and teams compare their preferred love languages. Enter how two people give and receive affirmation, quality time, gifts, acts of service, and physical touch to generate a compatibility report that highlights alignment and gaps.
 
@@ -37,11 +38,6 @@ AffectionMap is a desktop application that helps couples, friends, and teams com
 3. Select **Generate Compatibility Report** to compute the alignment analysis.
 4. Review the generated radar plots and written insights to understand the relationship dynamics.
 
-### Interface tour
-
-Describe the opening screen, including the fields for each love language.
-
-![Main interface placeholder](docs/images/main-interface.png)
 
 ### Compatibility report
 
